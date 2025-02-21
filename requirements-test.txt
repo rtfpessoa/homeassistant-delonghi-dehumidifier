@@ -1,0 +1,14 @@
+-r requirements-dev.txt
+
+pytest-asyncio>=0.24.0
+pytest>=8.3.4
+pytest-cov>=6.0.0
+pytest-homeassistant-custom-component>=0.13.214
+tzdata
+ruff>=0.9.7
+
+# flake8~=6.1
+# flake8-docstrings~=1.7
+# mypy==1.7.0
+# pylint~=3.0
+# pylint-strict-informational==0.1
