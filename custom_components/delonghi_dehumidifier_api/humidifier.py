@@ -91,6 +91,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         self._attr_name = "Unit"
         self._attr_device_info = device_info
         self._poll_generation = 0
+        self._completed_poll_generation = 0
         _LOGGER.debug("Initialized %s", self._attr_unique_id)
 
     async def async_added_to_hass(self) -> None:
@@ -107,7 +108,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         except Exception as err:  # noqa: BLE001
             self._poll_failed(generation, err, _LOGGER)
             return
-        if generation != self._poll_generation:
+        if not self._accept_poll(generation):
             return
         (
             self._attr_mode,

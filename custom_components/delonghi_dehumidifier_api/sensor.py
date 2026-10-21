@@ -231,6 +231,7 @@ class GenericSensor(AuthAvailabilityEntity, SensorEntity):
         self._attr_native_unit_of_measurement = unit_of_measurement
         self._attr_options = options
         self._poll_generation = 0
+        self._completed_poll_generation = 0
         _LOGGER.debug("Initialized %s", self._attr_unique_id)
 
     async def async_added_to_hass(self) -> None:
@@ -256,7 +257,7 @@ class GenericSensor(AuthAvailabilityEntity, SensorEntity):
         except Exception as err:  # noqa: BLE001
             self._poll_failed(generation, err, _LOGGER)
             return
-        if generation != self._poll_generation:
+        if not self._accept_poll(generation):
             return
         self._attr_native_value = value
         self._attr_available = True
