@@ -40,9 +40,11 @@ jobs:
         include:
           - python: "3.13.16"
             homeassistant: "2025.2.4"
+            frontend: "20250214.0"
             test_plugin: "0.13.214"
           - python: "3.14.8"
             homeassistant: "2026.10.2"
+            frontend: "20260930.4"
             test_plugin: "0.13.373"
     steps:
       - uses: "actions/checkout@v4"
@@ -53,6 +55,7 @@ jobs:
         run: >-
           python -m pip install -r requirements-test.txt
           "homeassistant==${{ matrix.homeassistant }}"
+          "home-assistant-frontend==${{ matrix.frontend }}"
           "pytest-homeassistant-custom-component==${{ matrix.test_plugin }}"
       - name: Run tests
         run: python -m pytest -q
