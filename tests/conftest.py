@@ -2,7 +2,7 @@
 # pylint: disable=unused-argument
 """Global fixtures for integration."""
 
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

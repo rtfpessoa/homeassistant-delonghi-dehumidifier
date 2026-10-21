@@ -2,17 +2,17 @@
 
 import asyncio
 import base64
-from collections.abc import Callable
-from datetime import datetime
-from enum import Enum
 import json
 import logging
 import time
-from uuid import uuid4
-from typing import Final
 import urllib.parse
-import aiohttp
+from collections.abc import Callable
+from datetime import datetime
+from enum import Enum
+from typing import Final
+from uuid import uuid4
 
+import aiohttp
 from homeassistant.exceptions import HomeAssistantError
 
 # API Docs: https://docs.aylanetworks.com/reference
@@ -377,9 +377,7 @@ class APIClient:
 
         """
         access_token = await self.get_access_token()
-        if access_token is None or access_token == "":
-            return False
-        return True
+        return not (access_token is None or access_token == "")
 
     async def get_product_name(self) -> str:
         """Retrieve the pretty product name defined by the user when setting up the device.

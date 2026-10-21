@@ -1,18 +1,15 @@
 """Test integration configuration flow"""
 
 # pylint: disable=unused-argument
-from typing import Any
-from unittest.mock import patch
 
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.const import (
-    CONF_PASSWORD,
-    CONF_LANGUAGE,
     CONF_EMAIL,
+    CONF_LANGUAGE,
+    CONF_PASSWORD,
 )
 from homeassistant.core import HomeAssistant
 
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.delonghi_dehumidifier_api.config_flow import DeLonghiConfigFlow
 from custom_components.delonghi_dehumidifier_api.const import (
     DOMAIN,

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from collections.abc import Callable, Coroutine
 from datetime import timedelta
 from enum import Enum
-import logging
-import re
 from typing import Any
 
 from homeassistant.components.sensor import (
