@@ -65,6 +65,14 @@ This custom component creates following entities for the dehumidifier:
 
 ## Troubleshooting
 
+To investigate tank alarms or switch synchronization, download diagnostics from
+the integration's menu under **Settings > Devices & services**. Take snapshots
+after the device has reported each condition, and describe what you observed.
+Allow time for the normal one-minute polling cycle after each change. The
+integration includes only selected numeric property values and acknowledgement
+status from its last successful poll; `cache_age_seconds` indicates their age.
+Home Assistant also includes system and integration information in the download.
+
 Debug logging can be activated without going through setup process:
 
 [![Logging service][ha-service-badge]][ha-service]
