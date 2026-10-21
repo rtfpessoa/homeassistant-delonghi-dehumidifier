@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import aiohttp
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
 
-from .client import APIClient
+from .client import APIClient, InvalidCredentialsError
 
 _PLATFORMS: list[Platform] = [
     Platform.HUMIDIFIER,
@@ -29,7 +31,16 @@ async def async_setup_entry(
     password = settings[CONF_PASSWORD]
 
     session = aiohttp_client.async_get_clientsession(hass)
-    entry.runtime_data = APIClient(session, language, email, password)
+    client = APIClient(session, language, email, password)
+    try:
+        authenticated = await client.authenticate()
+    except InvalidCredentialsError as err:
+        raise ConfigEntryAuthFailed from err
+    except (aiohttp.ClientError, TimeoutError) as err:
+        raise ConfigEntryNotReady("Unable to contact DeLonghi") from err
+    if not authenticated:
+        raise ConfigEntryNotReady("Unable to authenticate with DeLonghi")
+    entry.runtime_data = client
 
     await hass.config_entries.async_forward_entry_setups(entry, _PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_options))

@@ -7,6 +7,12 @@
           "email": "[%key:common::config_flow::data::email%]",
           "password": "[%key:common::config_flow::data::password%]"
         }
+      },
+      "reauth_confirm": {
+        "description": "Enter the password for {email} to reconnect your DeLonghi account.",
+        "data": {
+          "password": "[%key:common::config_flow::data::password%]"
+        }
       }
     },
     "error": {
@@ -15,7 +21,10 @@
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
-      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "reauth_successful": "Reauthentication was successful",
+      "reauth_settings_changed": "The integration settings changed. Please start reauthentication again.",
+      "reauth_cancelled": "Reauthentication was cancelled."
     }
   }
 }

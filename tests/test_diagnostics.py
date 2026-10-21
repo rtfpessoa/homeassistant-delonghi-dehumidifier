@@ -72,6 +72,7 @@ async def diagnostics_entry(hass):
     )
     entry.add_to_hass(hass)
     with (
+        patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
         patch.object(APIClient, "get_first_device", AsyncMock(return_value=SECRETS[3])),
         patch.object(APIClient, "get_request", AsyncMock(return_value=records)) as get,
         patch.object(APIClient, "post_request", new_callable=AsyncMock) as post,

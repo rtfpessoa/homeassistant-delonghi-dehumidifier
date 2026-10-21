@@ -66,6 +66,7 @@ async def test_temperature_sensors_use_tenths_of_celsius(
     )
     entry.add_to_hass(hass)
     client_mocks = {
+        "authenticate": AsyncMock(return_value=True),
         "get_first_device": AsyncMock(return_value="test-dsn"),
         "get_properties": AsyncMock(return_value=properties),
     }

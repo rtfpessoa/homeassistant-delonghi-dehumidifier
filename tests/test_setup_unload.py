@@ -51,6 +51,7 @@ async def test_setup_and_unload_device(hass):
     entry.add_to_hass(hass)
 
     with (
+        patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
         patch.object(APIClient, "get_first_device", AsyncMock(return_value="TEST-DSN")),
         patch.object(
             APIClient, "get_request", AsyncMock(return_value=device_properties)
