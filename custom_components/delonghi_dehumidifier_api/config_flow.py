@@ -6,7 +6,6 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
@@ -96,19 +95,14 @@ class DeLonghiOptionsFlow(config_entries.OptionsFlow):
             else:
                 return self.async_create_entry(title=info["title"], data=user_input)
 
+        settings = {**self.config_entry.data, **self.config_entry.options}
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Required(
-                        CONF_LANGUAGE, default=self.config_entry.data[CONF_LANGUAGE]
-                    ): str,
-                    vol.Required(
-                        CONF_EMAIL, default=self.config_entry.data[CONF_EMAIL]
-                    ): str,
-                    vol.Required(
-                        CONF_PASSWORD, self.config_entry.data[CONF_PASSWORD]
-                    ): str,
+                    vol.Required(CONF_LANGUAGE, default=settings[CONF_LANGUAGE]): str,
+                    vol.Required(CONF_EMAIL, default=settings[CONF_EMAIL]): str,
+                    vol.Required(CONF_PASSWORD): str,
                 }
             ),
             errors=errors,

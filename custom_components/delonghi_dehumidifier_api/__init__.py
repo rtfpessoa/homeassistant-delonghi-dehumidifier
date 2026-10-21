@@ -23,16 +23,25 @@ async def async_setup_entry(
 ) -> bool:
     """Set up DeLonghi Dehumidifier from a config entry."""
 
-    language = entry.data[CONF_LANGUAGE]
-    email = entry.data[CONF_EMAIL]
-    password = entry.data[CONF_PASSWORD]
+    settings = {**entry.data, **entry.options}
+    language = settings[CONF_LANGUAGE]
+    email = settings[CONF_EMAIL]
+    password = settings[CONF_PASSWORD]
 
     session = aiohttp_client.async_get_clientsession(hass)
     entry.runtime_data = APIClient(session, language, email, password)
 
     await hass.config_entries.async_forward_entry_setups(entry, _PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_async_update_options))
 
     return True
+
+
+async def _async_update_options(
+    hass: HomeAssistant, entry: DeLonghiDehumidifierConfigEntry
+) -> None:
+    """Reload the entry after its options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(
