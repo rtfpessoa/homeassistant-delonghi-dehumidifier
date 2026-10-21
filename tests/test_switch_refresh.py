@@ -118,7 +118,7 @@ async def test_external_changes_are_reflected(hass, device):
     properties.update(set_eco=0, swing=1)
     entry.runtime_data.device_properties_timestamp = 0
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=2))
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert hass.states.get(eco).state == STATE_OFF
     assert hass.states.get(swing).state == STATE_ON
 

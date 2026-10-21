@@ -356,6 +356,8 @@ class APIClient:
         self.token_expiry = time.time()
         self._token_request: asyncio.Task[str | None] | None = None
         self._token_waiters = 0
+        self._properties_request: asyncio.Task[list[dict]] | None = None
+        self._properties_waiters = 0
         self._closed = False
         self._invalid_credentials = False
         self.reauth_id = uuid4().hex
@@ -688,13 +690,18 @@ class APIClient:
             raise InvalidCredentialsError("DeLonghi credentials were rejected")
 
     async def async_shutdown(self) -> None:
-        """Cancel a pending login when the associated entry is unloaded."""
+        """Cancel pending requests when the associated entry is unloaded."""
         self._closed = True
         self.on_invalid_credentials = None
-        request = self._token_request
-        if request is not None:
+        requests = [
+            request
+            for request in (self._properties_request, self._token_request)
+            if request is not None
+        ]
+        for request in requests:
             request.cancel()
-            await asyncio.gather(request, return_exceptions=True)
+        if requests:
+            await asyncio.gather(*requests, return_exceptions=True)
 
     def _report_invalid_credentials(self) -> None:
         """Notify the runtime integration of a confirmed credential rejection."""
@@ -1098,19 +1105,48 @@ class APIClient:
         ):
             return self.device_properties
 
+        if self._properties_request is None:
+            request = asyncio.create_task(self._fetch_properties())
+            self._properties_request = request
+            request.add_done_callback(self._properties_request_finished)
+        request = self._properties_request
+        self._properties_waiters += 1
+        try:
+            await asyncio.wait((request,))
+            properties = request.result()
+            self._ensure_valid_credentials()
+            return properties
+        finally:
+            self._properties_waiters -= 1
+            if self._properties_waiters == 0 and not request.done():
+                if self._properties_request is request:
+                    self._properties_request = None
+                request.cancel()
+
+    async def _fetch_properties(self) -> list[dict]:
+        """Fetch a snapshot once for all current readers."""
         device_dsn = await self.get_first_device()
         request_started = time.monotonic()
         device_properties = await self.get_request(
             f"apiv1/dsns/{device_dsn}/properties.json"
         )
-
-        self.device_properties = [
+        self._ensure_valid_credentials()
+        properties = [
             device_property.get("property") for device_property in device_properties
         ]
-        self.device_properties_request_started = request_started
-        self.device_properties_timestamp = time.time()
+        # An abandoned, cancellation-resistant request must not replace newer data.
+        if self._properties_request is asyncio.current_task():
+            self.device_properties = properties
+            self.device_properties_request_started = request_started
+            self.device_properties_timestamp = time.time()
+        return properties
 
-        return self.device_properties
+    def _properties_request_finished(self, request: asyncio.Task) -> None:
+        """Release a finished request and consume any unobserved error."""
+        if self._properties_request is request:
+            self._properties_request = None
+        if not request.cancelled():
+            request.exception()
 
     async def get_query_param(self, url: str, param: str) -> str | None:
         """Extract the value of a specified query parameter from a given URL.
