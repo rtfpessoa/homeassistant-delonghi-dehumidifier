@@ -20,7 +20,7 @@
     },
     "error": {
       "cannot_connect": "Could not connect to De'Longhi. Please try again.",
-      "invalid_auth": "The email or password is incorrect.",
+      "invalid_auth": "Could not sign in. Check your email and password, or try again later.",
       "unknown": "An unexpected error occurred. Please try again."
     },
     "abort": {
@@ -44,7 +44,7 @@
       }
     },
     "error": {
-      "invalid_auth": "The email or password is incorrect.",
+      "invalid_auth": "Could not sign in. Check your email and password, or try again later.",
       "unknown": "An unexpected error occurred. Please try again."
     }
   }

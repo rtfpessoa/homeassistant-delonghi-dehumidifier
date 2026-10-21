@@ -71,6 +71,33 @@ async def test_setup_and_options_labels_and_errors(hass, flow_type, failure, exp
     assert text and "[%key:" not in text
 
 
+@pytest.mark.parametrize("flow_type", ["config", "options"])
+async def test_empty_token_error_does_not_claim_incorrect_credentials(hass, flow_type):
+    """An empty access token also uses invalid_auth, without proving its cause."""
+    if flow_type == "config":
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        manager = hass.config_entries.flow
+    else:
+        entry = MockConfigEntry(domain=DOMAIN, data=CONFIG)
+        entry.add_to_hass(hass)
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        manager = hass.config_entries.options
+
+    with patch(
+        "custom_components.delonghi_dehumidifier_api.config_flow.APIClient.authenticate",
+        AsyncMock(return_value=False),
+    ):
+        result = await manager.async_configure(result["flow_id"], user_input=CONFIG)
+
+    assert result["errors"]["base"] == "invalid_auth"
+    translations = await async_get_translations(hass, "en", flow_type, [DOMAIN])
+    assert translations[f"{PREFIX}.{flow_type}.error.invalid_auth"] == (
+        "Could not sign in. Check your email and password, or try again later."
+    )
+
+
 @pytest.mark.parametrize(
     ("failure", "expected"),
     [
