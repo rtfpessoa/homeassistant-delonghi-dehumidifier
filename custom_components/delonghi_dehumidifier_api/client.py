@@ -10,6 +10,8 @@ from typing import Final
 import urllib.parse
 import aiohttp
 
+from homeassistant.exceptions import HomeAssistantError
+
 # API Docs: https://docs.aylanetworks.com/reference
 
 # Thanks to https://github.com/duckwc/ECAMpy for the code to token conversion
@@ -875,6 +877,15 @@ class APIClient:
 
         return self.access_token
 
+    @staticmethod
+    async def _read_response(response: aiohttp.ClientResponse) -> dict:
+        """Decode a successful response or report its HTTP status."""
+        if not 200 <= response.status < 300:
+            raise HomeAssistantError(
+                f"DeLonghi API request failed (HTTP {response.status})"
+            )
+        return await response.json()
+
     async def get_request(self, path: str) -> dict:
         """Send a GET request to the specified path.
 
@@ -891,8 +902,8 @@ class APIClient:
             "User-Agent": API_USER_AGENT,
             "Authorization": f"auth_token {access_token}",
         }
-        response = await self.session.get(url, headers=headers)
-        return await response.json()
+        async with self.session.get(url, headers=headers) as response:
+            return await self._read_response(response)
 
     async def post_request(self, path: str, body: dict) -> dict:
         """Send a POST request to the specified path with the given body.
@@ -913,8 +924,8 @@ class APIClient:
             "Authorization": f"auth_token {access_token}",
             "Content-Type": "application/json",
         }
-        response = await self.session.post(url, headers=headers, json=body)
-        return await response.json()
+        async with self.session.post(url, headers=headers, json=body) as response:
+            return await self._read_response(response)
 
     async def get_first_device(self) -> str:
         """Retrieve the first device's DSN (Device Serial Number).
