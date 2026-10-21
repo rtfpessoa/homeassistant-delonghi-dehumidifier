@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import aiohttp_client
 
-from .client import APIClient
+from .client import APIClient, InvalidCredentialsError
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,7 +37,10 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     client = APIClient(
         session, data[CONF_LANGUAGE], data[CONF_EMAIL], data[CONF_PASSWORD]
     )
-    authenticated = await client.authenticate()
+    try:
+        authenticated = await client.authenticate()
+    except InvalidCredentialsError as err:
+        raise InvalidAuth from err
     if not authenticated:
         raise InvalidAuth
 

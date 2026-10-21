@@ -325,6 +325,18 @@ FILTER_STATUS_BY_VALUE: Final = {status.value: status for status in FilterStatus
 _LOGGER = logging.getLogger(__name__)
 
 
+class InvalidCredentialsError(Exception):
+    """The provider rejected the account credentials."""
+
+
+def _login_token_from_response(response: str) -> str:
+    """Read the login token or identify a documented credentials error."""
+    data = json.loads(response)
+    if data.get("errorCode") == 403042:
+        raise InvalidCredentialsError
+    return data["sessionInfo"]["login_token"]
+
+
 class APIClient:
     """Client for interacting with the DeLonghi dehumidifier API."""
 
@@ -771,10 +783,7 @@ class APIClient:
             "format": "json",
         }
         response = await self.session.post(url, headers=headers, data=data)
-        response = await response.text()
-        response = json.loads(response)
-
-        login_token = response["sessionInfo"]["login_token"]
+        login_token = _login_token_from_response(await response.text())
 
         # Step 4: Get user info
         url = "https://socialize.eu1.gigya.com/socialize.getUserInfo"
