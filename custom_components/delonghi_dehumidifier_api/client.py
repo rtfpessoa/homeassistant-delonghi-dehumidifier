@@ -631,25 +631,20 @@ class APIClient:
             "Content-Type": "application/json",
         }
         body = {"user": {"refresh_token": self.refresh_token}}
-        response = await self.session.post(url, headers=headers, json=body)
-        response = await response.json()
+        async with self.session.post(url, headers=headers, json=body) as response:
+            if response.status == 200:
+                data = await response.json()
+                self.refresh_token = data["refresh_token"]
+                self.access_token = data["access_token"]
+                self.token_expiry = time.time() + int(data["expires_in"])
+                return self.access_token
 
-        if response.status != 200:
-            _LOGGER.error(
-                "Failed retrieving new access token with response: %s", response
+            _LOGGER.warning(
+                "Failed to refresh access token (HTTP %s); falling back to login",
+                response.status,
             )
-            _LOGGER.error("Falling back to login")
-            return await self.get_new_refresh_token()
 
-        data = await response.json()
-
-        self.refresh_token = data["refresh_token"]
-        self.access_token = data["access_token"]
-        self.token_expiry = time.time() + int(data["expires_in"])
-
-        _LOGGER.debug("data get_new_access_token: %s", data)
-
-        return self.access_token
+        return await self.get_new_refresh_token()
 
     async def get_new_refresh_token(self):
         """Obtain a new refresh token and access token.
