@@ -27,6 +27,32 @@ jobs:
         - uses: "actions/checkout@v4"
         - uses: "actions/setup-python@v5"
           with:
-            python-version: "3.x"
-        - run: python3 -m pip install black
-        - run: black .
+            python-version: "3.14.8"
+        - run: python -m pip install black==26.10.1
+        - run: black --check .
+
+  tests:
+    runs-on: "ubuntu-latest"
+    name: Test Home Assistant ${{ matrix.homeassistant }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.13.16"
+            homeassistant: "2025.2.4"
+            test_plugin: "0.13.214"
+          - python: "3.14.8"
+            homeassistant: "2026.10.2"
+            test_plugin: "0.13.373"
+    steps:
+      - uses: "actions/checkout@v4"
+      - uses: "actions/setup-python@v5"
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install matched test dependencies
+        run: >-
+          python -m pip install -r requirements-test.txt
+          "homeassistant==${{ matrix.homeassistant }}"
+          "pytest-homeassistant-custom-component==${{ matrix.test_plugin }}"
+      - name: Run tests
+        run: python -m pytest -q
