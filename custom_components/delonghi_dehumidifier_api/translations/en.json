@@ -1,0 +1,51 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "data": {
+          "language": "De'Longhi account language",
+          "email": "Email",
+          "password": "Password"
+        },
+        "data_description": {
+          "language": "Language code sent to De'Longhi when signing in."
+        }
+      },
+      "reauth_confirm": {
+        "description": "Enter the password for {email} to reconnect your De'Longhi account.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to De'Longhi. Please try again.",
+      "invalid_auth": "Could not sign in. Check your email and password, or try again later.",
+      "unknown": "An unexpected error occurred. Please try again."
+    },
+    "abort": {
+      "already_configured": "This device is already configured.",
+      "reauth_successful": "Reauthentication was successful.",
+      "reauth_settings_changed": "The integration settings changed. Please start reauthentication again.",
+      "reauth_cancelled": "Reauthentication was cancelled."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "language": "De'Longhi account language",
+          "email": "Email",
+          "password": "Password"
+        },
+        "data_description": {
+          "language": "Language code sent to De'Longhi when signing in."
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Could not sign in. Check your email and password, or try again later.",
+      "unknown": "An unexpected error occurred. Please try again."
+    }
+  }
+}
