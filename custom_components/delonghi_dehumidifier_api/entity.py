@@ -1,14 +1,35 @@
 """Shared authentication availability for DeLonghi entities."""
 
+import logging
+
 from homeassistant.helpers.entity import Entity
 
-from .client import APIClient
+from .client import APIClient, InvalidCredentialsError
 
 
 class AuthAvailabilityEntity(Entity):
     """Expose confirmed credential rejection on all entities immediately."""
 
     client: APIClient
+    _poll_generation: int
+    _completed_poll_generation: int
+
+    def _accept_poll(self, generation: int) -> bool:
+        """Accept a result unless a newer poll has already completed."""
+        if generation < self._completed_poll_generation:
+            return False
+        self._completed_poll_generation = generation
+        return True
+
+    def _poll_failed(
+        self, generation: int, err: Exception, logger: logging.Logger
+    ) -> None:
+        """Mark a failed poll unavailable unless a newer poll has completed."""
+        if not self._accept_poll(generation):
+            return
+        if self.available and not isinstance(err, InvalidCredentialsError):
+            logger.warning("Unable to update %s (%s)", self.name, type(err).__name__)
+        self._attr_available = False
 
     @property
     def available(self) -> bool:
