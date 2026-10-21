@@ -1,0 +1,51 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "data": {
+          "language": "Sprache des De'Longhi-Kontos",
+          "email": "E-Mail-Adresse",
+          "password": "Passwort"
+        },
+        "data_description": {
+          "language": "Sprachcode, der bei der Anmeldung an De'Longhi gesendet wird."
+        }
+      },
+      "reauth_confirm": {
+        "description": "Gib das Passwort für {email} ein, um dein De'Longhi-Konto erneut zu verbinden.",
+        "data": {
+          "password": "Passwort"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Die Verbindung zu De'Longhi konnte nicht hergestellt werden. Bitte versuche es erneut.",
+      "invalid_auth": "Die Anmeldung ist fehlgeschlagen. Prüfe deine E-Mail-Adresse und dein Passwort oder versuche es später erneut.",
+      "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut."
+    },
+    "abort": {
+      "already_configured": "Dieses Gerät ist bereits eingerichtet.",
+      "reauth_successful": "Die erneute Anmeldung war erfolgreich.",
+      "reauth_settings_changed": "Die Integrationseinstellungen wurden geändert. Bitte starte den Anmeldevorgang erneut.",
+      "reauth_cancelled": "Die erneute Anmeldung wurde abgebrochen."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "language": "Sprache des De'Longhi-Kontos",
+          "email": "E-Mail-Adresse",
+          "password": "Passwort"
+        },
+        "data_description": {
+          "language": "Sprachcode, der bei der Anmeldung an De'Longhi gesendet wird."
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Die Anmeldung ist fehlgeschlagen. Prüfe deine E-Mail-Adresse und dein Passwort oder versuche es später erneut.",
+      "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut."
+    }
+  }
+}
