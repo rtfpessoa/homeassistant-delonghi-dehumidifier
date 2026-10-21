@@ -202,7 +202,7 @@ async def test_concurrent_invalid_credentials_do_not_cause_login_storm(
 
 
 async def test_invalid_auth_marks_polled_entities_unavailable(hass, loaded_entry):
-    entry, _, sensor_ids = loaded_entry
+    _entry, _, sensor_ids = loaded_entry
     registry = er.async_get(hass)
     humidifier_id = registry.async_get_entity_id(
         "humidifier", DOMAIN, f"{DOMAIN}_test-dsn_dehumidifier"
@@ -213,7 +213,7 @@ async def test_invalid_auth_marks_polled_entities_unavailable(hass, loaded_entry
 
 
 async def test_alarm_and_sensors_share_one_failed_login_and_reauth(hass, loaded_entry):
-    entry, session, sensor_ids = loaded_entry
+    _entry, session, sensor_ids = loaded_entry
     alarm_id = er.async_get(hass).async_get_entity_id(
         "binary_sensor", DOMAIN, f"{DOMAIN}_test-dsn_device_alarm_binary_sensor"
     )
@@ -441,7 +441,7 @@ async def test_concurrent_successful_token_requests_share_one_login():
 
 
 async def test_runtime_switch_command_starts_reauth(hass, loaded_entry):
-    entry, session, _ = loaded_entry
+    _entry, session, _ = loaded_entry
     registry = er.async_get(hass)
     entity_id = registry.async_get_entity_id(
         "switch", DOMAIN, f"{DOMAIN}_test-dsn_eco_mode_switch"
