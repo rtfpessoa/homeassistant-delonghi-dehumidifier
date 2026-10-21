@@ -145,7 +145,7 @@ async def test_alarm_is_polled(hass, device):
     entry.runtime_data.device_properties_timestamp = 0
 
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=2))
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert hass.states.get(entity_id).state == STATE_ON
 
 
@@ -211,13 +211,13 @@ async def test_failed_poll_is_unavailable_and_recovers(hass, device, error):
     entry.runtime_data.device_properties_timestamp = 0
     with patch.object(entry.runtime_data, "get_request", AsyncMock(side_effect=error)):
         async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=2))
-        await hass.async_block_till_done()
+        await hass.async_block_till_done(wait_background_tasks=True)
     assert hass.states.get(entity_id).state == STATE_UNAVAILABLE
 
     properties["alarm_state"] = 3 if initial_state == STATE_OFF else 0
     entry.runtime_data.device_properties_timestamp = 0
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=4))
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert hass.states.get(entity_id).state == (
         STATE_ON if initial_state == STATE_OFF else STATE_OFF
     )
