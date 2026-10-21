@@ -151,13 +151,12 @@ async def async_setup_entry(
                 SensorDeviceClass.ENUM,
                 options=[status.name for status in OffOnStatus],
             ),
-            # TODO: Fix units
             GenericSensor(
                 device_dsn,
                 device_info,
                 client,
                 "Filter Life",
-                client.get_filter_life,
+                get_filter_life_days(client.get_filter_life),
                 SensorDeviceClass.DURATION,
                 state_class=SensorStateClass.MEASUREMENT,
                 unit_of_measurement=UnitOfTime.DAYS,
@@ -234,3 +233,15 @@ class GenericSensor(SensorEntity):
                 "value": self._attr_native_value,
             },
         )
+
+
+def get_filter_life_days(
+    get_current_value: Callable[[], Coroutine[Any, Any, int | None]],
+) -> Callable[[], Coroutine[Any, Any, float | None]]:
+    """Convert the API's filter-life duration from minutes to days."""
+
+    async def wrapper() -> float | None:
+        minutes = await get_current_value()
+        return None if minutes is None else minutes / (24 * 60)
+
+    return wrapper
