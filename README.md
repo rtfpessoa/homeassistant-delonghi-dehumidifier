@@ -25,6 +25,13 @@ Once the integration is installed, you can add it to the Home Assistant by going
 
 The automated tests cover Home Assistant 2025.2.4 and 2026.10.2 with a mocked cloud API.
 
+### Versions
+
+Home Assistant shows the installed integration's manifest version on its page
+under **Settings > Devices & services**. Without a published GitHub release,
+HACS tracks the default branch and identifies updates by commit hash. Publishing
+a GitHub release is a separate step from changing the manifest version.
+
 ### Configuring
 
 1. Add `DeLonghi Dehumidifier (API)` integration via UI.
