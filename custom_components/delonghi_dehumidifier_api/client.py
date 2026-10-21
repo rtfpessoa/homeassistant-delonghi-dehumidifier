@@ -358,6 +358,10 @@ class APIClient:
         self._token_waiters = 0
         self._properties_request: asyncio.Task[list[dict]] | None = None
         self._properties_waiters = 0
+        self._properties_generation = 0
+        self._properties_request_generation = 0
+        self._properties_idle = asyncio.Event()
+        self._properties_idle.set()
         self._closed = False
         self._invalid_credentials = False
         self.reauth_id = uuid4().hex
@@ -1098,15 +1102,33 @@ class APIClient:
           list: A list of device properties.
 
         """
-        self._ensure_valid_credentials()
+        await self._wait_for_current_properties()
         now = time.time()
         if self.device_properties_timestamp is not None and (
             now - self.device_properties_timestamp < 10
         ):
             return self.device_properties
 
+        return await self._request_properties()
+
+    async def _wait_for_current_properties(self) -> None:
+        """Let an older GET drain before allowing post-command readers."""
+        self._ensure_valid_credentials()
+        while (
+            self._properties_request is not None
+            and self._properties_request_generation < self._properties_generation
+        ):
+            await self._properties_idle.wait()
+            self._ensure_valid_credentials()
+
+    async def _request_properties(self) -> list[dict]:
+        """Join a shared GET, releasing it after its last reader leaves."""
         if self._properties_request is None:
-            request = asyncio.create_task(self._fetch_properties())
+            self._properties_request_generation = self._properties_generation
+            self._properties_idle.clear()
+            request = asyncio.create_task(
+                self._fetch_properties(self._properties_generation)
+            )
             self._properties_request = request
             request.add_done_callback(self._properties_request_finished)
         request = self._properties_request
@@ -1118,12 +1140,19 @@ class APIClient:
             return properties
         finally:
             self._properties_waiters -= 1
-            if self._properties_waiters == 0 and not request.done():
+            if self._properties_waiters == 0:
                 if self._properties_request is request:
                     self._properties_request = None
-                request.cancel()
+                    self._properties_idle.set()
+                if not request.done():
+                    request.cancel()
 
-    async def _fetch_properties(self) -> list[dict]:
+    def invalidate_properties(self) -> None:
+        """Require future readers to fetch a post-command snapshot."""
+        self._properties_generation += 1
+        self.device_properties_timestamp = 0
+
+    async def _fetch_properties(self, generation: int) -> list[dict]:
         """Fetch a snapshot once for all current readers."""
         device_dsn = await self.get_first_device()
         request_started = time.monotonic()
@@ -1135,7 +1164,10 @@ class APIClient:
             device_property.get("property") for device_property in device_properties
         ]
         # An abandoned, cancellation-resistant request must not replace newer data.
-        if self._properties_request is asyncio.current_task():
+        if (
+            self._properties_request is asyncio.current_task()
+            and generation == self._properties_generation
+        ):
             self.device_properties = properties
             self.device_properties_request_started = request_started
             self.device_properties_timestamp = time.time()
@@ -1143,8 +1175,9 @@ class APIClient:
 
     def _properties_request_finished(self, request: asyncio.Task) -> None:
         """Release a finished request and consume any unobserved error."""
-        if self._properties_request is request:
+        if self._properties_request is request and not self._properties_waiters:
             self._properties_request = None
+            self._properties_idle.set()
         if not request.cancelled():
             request.exception()
 
