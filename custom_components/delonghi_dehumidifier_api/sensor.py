@@ -167,13 +167,13 @@ async def async_setup_entry(
 
 
 def get_and_extract_enum_name(
-    get_current_value: Callable[[], Coroutine[Any, Any, Enum]],
-) -> Callable[[], Coroutine[Any, Any, str]]:
+    get_current_value: Callable[[], Coroutine[Any, Any, Enum | None]],
+) -> Callable[[], Coroutine[Any, Any, str | None]]:
     """Wrap a Callable that returns an Awaitable[Enum], and returns a Callable returning an Awaitable[str] with the enum name."""
 
-    async def wrapper() -> str:
+    async def wrapper() -> str | None:
         mode = await get_current_value()
-        return mode.name
+        return mode.name if mode is not None else None
 
     return wrapper
 

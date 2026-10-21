@@ -69,12 +69,12 @@ class GenericOffOnSwitchSensor(SwitchEntity):
         device_info: DeviceInfo,
         client: APIClient,
         type_name: str,
-        status: OffOnStatus,
+        status: OffOnStatus | None,
         set_status: Callable[[OffOnStatus], Coroutine[Any, Any, dict[Any, Any]]],
     ) -> None:
         """Initialize."""
         self.client = client
-        self._is_on = status == OffOnStatus.ON
+        self._is_on = None if status is None else status == OffOnStatus.ON
         self._attr_unique_id = (
             f"{DOMAIN}_{device_dsn}_{re.sub(r'\s+', '_', type_name.lower())}_switch"
         )
