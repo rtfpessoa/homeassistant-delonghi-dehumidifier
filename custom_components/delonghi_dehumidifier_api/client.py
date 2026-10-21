@@ -1,11 +1,14 @@
 """Module providing a client for interacting with the DeLonghi dehumidifier API."""
 
+import asyncio
 import base64
+from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
 import json
 import logging
 import time
+from uuid import uuid4
 from typing import Final
 import urllib.parse
 import aiohttp
@@ -325,7 +328,7 @@ FILTER_STATUS_BY_VALUE: Final = {status.value: status for status in FilterStatus
 _LOGGER = logging.getLogger(__name__)
 
 
-class InvalidCredentialsError(Exception):
+class InvalidCredentialsError(HomeAssistantError):
     """The provider rejected the account credentials."""
 
 
@@ -333,7 +336,7 @@ def _login_token_from_response(response: str) -> str:
     """Read the login token or identify a documented credentials error."""
     data = json.loads(response)
     if data.get("errorCode") == 403042:
-        raise InvalidCredentialsError
+        raise InvalidCredentialsError("DeLonghi credentials were rejected")
     return data["sessionInfo"]["login_token"]
 
 
@@ -351,6 +354,13 @@ class APIClient:
         self.refresh_token = None
         self.access_token = None
         self.token_expiry = time.time()
+        self._token_request: asyncio.Task[str | None] | None = None
+        self._token_waiters = 0
+        self._closed = False
+        self._invalid_credentials = False
+        self.reauth_id = uuid4().hex
+        self.on_invalid_credentials: Callable[[], None] | None = None
+        self._auth_listeners: set[Callable[[], None]] = set()
         self.device_properties = None
         self.device_properties_timestamp = 0.0
         self.device_properties_request_started = None
@@ -612,6 +622,8 @@ class APIClient:
           str: The access token.
 
         """
+        self._ensure_valid_credentials()
+
         if (
             self.access_token is not None
             and self.access_token != ""
@@ -620,7 +632,76 @@ class APIClient:
             _LOGGER.debug("Using existing access token")
             return self.access_token
 
-        return await self.get_new_access_token()
+        return await self._request_access_token()
+
+    async def _request_access_token(self):
+        """Share a token request among concurrent callers."""
+        if self._token_request is None:
+            request = asyncio.create_task(self._fetch_access_token())
+            self._token_request = request
+            request.add_done_callback(self._token_request_finished)
+        request = self._token_request
+        self._token_waiters += 1
+        try:
+            # Unlike awaiting the task directly, wait does not propagate cancellation.
+            await asyncio.wait((request,))
+            return request.result()
+        finally:
+            self._token_waiters -= 1
+            if self._token_waiters == 0 and not request.done():
+                if self._token_request is request:
+                    self._token_request = None
+                request.cancel()
+
+    async def _fetch_access_token(self):
+        """Fetch a token and notify entities once if credentials are rejected."""
+        try:
+            return await self.get_new_access_token()
+        except InvalidCredentialsError:
+            self._invalid_credentials = True
+            for listener in tuple(self._auth_listeners):
+                listener()
+            self._report_invalid_credentials()
+            raise
+
+    def _token_request_finished(self, request: asyncio.Task) -> None:
+        """Release a completed request and consume an otherwise unobserved error."""
+        if self._token_request is request:
+            self._token_request = None
+        if not request.cancelled():
+            request.exception()
+
+    @property
+    def invalid_credentials(self) -> bool:
+        """Whether the provider confirmed rejection of this client's credentials."""
+        return self._invalid_credentials
+
+    def subscribe_auth_failure(
+        self, listener: Callable[[], None]
+    ) -> Callable[[], None]:
+        """Subscribe to credential rejection and return an unsubscribe callback."""
+        self._auth_listeners.add(listener)
+        return lambda: self._auth_listeners.discard(listener)
+
+    def _ensure_valid_credentials(self) -> None:
+        if self._closed:
+            raise HomeAssistantError("DeLonghi client is closed")
+        if self._invalid_credentials:
+            raise InvalidCredentialsError("DeLonghi credentials were rejected")
+
+    async def async_shutdown(self) -> None:
+        """Cancel a pending login when the associated entry is unloaded."""
+        self._closed = True
+        self.on_invalid_credentials = None
+        request = self._token_request
+        if request is not None:
+            request.cancel()
+            await asyncio.gather(request, return_exceptions=True)
+
+    def _report_invalid_credentials(self) -> None:
+        """Notify the runtime integration of a confirmed credential rejection."""
+        if self.on_invalid_credentials is not None:
+            self.on_invalid_credentials()
 
     async def get_new_access_token(self):
         """Retrieve a new access token using the refresh token if available.
@@ -1012,6 +1093,7 @@ class APIClient:
           list: A list of device properties.
 
         """
+        self._ensure_valid_credentials()
         now = time.time()
         if self.device_properties_timestamp is not None and (
             now - self.device_properties_timestamp < 10
