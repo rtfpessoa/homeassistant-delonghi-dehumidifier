@@ -12,6 +12,7 @@ from homeassistant.helpers import aiohttp_client
 from .client import APIClient, InvalidCredentialsError
 
 _PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
     Platform.HUMIDIFIER,
     Platform.SENSOR,
     Platform.SWITCH,

@@ -67,8 +67,16 @@ This custom component creates following entities for the dehumidifier:
 | `sensor`     | Sensors for swing mode.                                                                                                          |
 | `sensor`     | Sensors for filter change alarm.                                                                                                 |
 | `sensor`     | Sensors for filter life.                                                                                                         |
+| `binary_sensor` | Device alarm using observed alarm values.                                                                                      |
 | `switch`     | Switch to enable eco mode.                                                                                                       |
 | `switch`     | Switch to enable fan swing.                                                                                                      |
+
+For a DDSX220, the device alarm uses the API's `alarm_state`: integer `0` is
+off, integer `3` is on, and other or missing values are unknown. This mapping
+is based on observations of one device: `3` was observed with a full tank and
+with the tank removed. The sensor cannot distinguish these conditions, and
+other causes for `3` have not been ruled out. Other or missing models report
+unknown until their alarm values are understood.
 
 ## Troubleshooting
 
