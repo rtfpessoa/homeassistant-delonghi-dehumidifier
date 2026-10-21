@@ -78,6 +78,11 @@ with the tank removed. The sensor cannot distinguish these conditions, and
 other causes for `3` have not been ruled out. Other or missing models report
 unknown until their alarm values are understood.
 
+Eco and swing switches update from the cloud during polling. After the cloud
+accepts a command, the switch initially shows the requested state; later updates
+show the state reported by the cloud, which may lag the device and does not
+confirm actuation.
+
 ## Troubleshooting
 
 To investigate tank alarms or switch synchronization, download diagnostics from
