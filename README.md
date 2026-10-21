@@ -30,6 +30,7 @@ and search for **DeLonghi Dehumidifier (API)**. You can also use My Home Assista
 1. Update Home Assistant to version 2025.2.4 or newer.
 2. Clone this repository.
 3. Copy the `custom_components/delonghi_dehumidifier_api` folder into your Home Assistant's `custom_components` folder.
+4. Restart Home Assistant, then follow the configuration steps below.
 
 The automated tests cover Home Assistant 2025.2.4 and 2026.10.2 with a mocked cloud API.
 
@@ -45,6 +46,10 @@ a GitHub release is a separate step from changing the manifest version.
 1. Add `DeLonghi Dehumidifier (API)` integration via UI.
 2. Enter DeLonghi language, cloud email and password.
 3. The integration uses the first device returned by the cloud API.
+
+If you also have the `delonghi_dehumidifier_wifi` integration, it has a separate
+Home Assistant entry. Adding this API integration does not automatically migrate
+the WiFi entities or automations that reference them.
 
 ## Supported appliances
 
