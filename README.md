@@ -4,16 +4,24 @@ This custom component for Home Assistant adds support for DeLonghi dehumidifier 
 
 [![Repository validation](https://github.com/rtfpessoa/homeassistant-delonghi-dehumidifier/actions/workflows/validate.yml/badge.svg)](https://github.com/rtfpessoa/homeassistant-delonghi-dehumidifier/actions/workflows/validate.yml)
 
-[![hacs][hacsbadge]][hacs]
-[![GitHub Release][releases-shield]][releases]
+[![HACS custom repository][hacsbadge]][hacs-custom]
 
-## Installation instruction
+## Installation
 
 ### HACS
 
-The easiest way to install this integration is with [HACS][hacs]. First, install [HACS][hacs-download] if you don't have it yet. In Home Assistant, go to `HACS -> Integrations`, click on `+ Explore & Download Repositories`, search for `DeLonghi Dehumidifier (API)`, and click download. After download, restart Home Assistant.
+Requires Home Assistant 2025.2.4 or newer and an installed, configured [HACS][hacs].
+See the HACS instructions for [downloading][hacs-download] and [setting up][hacs-setup] HACS.
 
-Once the integration is installed, you can add it to the Home Assistant by going to `Configuration -> Devices & Services`, clicking `+ Add Integration` and searching for `DeLonghi Dehumidifier (API)` or, using My Home Assistant service, you can click on:
+1. In Home Assistant, open **HACS** from the sidebar.
+2. Open the three-dot menu in the top right and select **Custom repositories**.
+3. Enter `https://github.com/rtfpessoa/homeassistant-delonghi-dehumidifier`, select
+   **Integration** as the type, and select **Add**.
+4. Find **DeLonghi Dehumidifier (API)** in HACS, open it, and select **Download**.
+5. Restart Home Assistant.
+
+Once installed, go to **Settings > Devices & services**, select **Add integration**,
+and search for **DeLonghi Dehumidifier (API)**. You can also use My Home Assistant:
 
 [![Add DeLonghi Dehumidifier (API)][add-integration-badge]][add-integration]
 
@@ -36,7 +44,7 @@ a GitHub release is a separate step from changing the manifest version.
 
 1. Add `DeLonghi Dehumidifier (API)` integration via UI.
 2. Enter DeLonghi language, cloud email and password.
-3. The integration will discover the appliance and create the devices.
+3. The integration uses the first device returned by the cloud API.
 
 ## Supported appliances
 
@@ -46,7 +54,8 @@ Requires account created in DeLonghi cloud.
 
 ## Limitations
 
-- Only supports a single device in the cloud account
+- Only the first device returned by the cloud API is used. If your account has
+  multiple devices, the integration does not provide a way to choose one.
 
 ## Supported entities
 
@@ -54,7 +63,7 @@ This custom component creates following entities for the dehumidifier:
 
 | Platform     | Description                                                                                                                      |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `humidifier` | Dehumidifier entity. Depending on the model following modes are supported: `DEHUMIDIFY`, `DRY_CLOTHES`, `PURIFIER`, `REAL_FEEL`. |
+| `humidifier` | Dehumidifier entity with selectable modes `DEHUMIDIFY`, `DRY_CLOTHES`, and `PURIFIER`.                                           |
 | `sensor`     | Sensors for current relative humidity measured by dehumidifier.                                                                  |
 | `sensor`     | Sensors for target humidity set in the dehumidifier.                                                                             |
 | `sensor`     | Sensors for current speed.                                                                                                       |
@@ -70,6 +79,8 @@ This custom component creates following entities for the dehumidifier:
 | `binary_sensor` | Device alarm using observed alarm values.                                                                                      |
 | `switch`     | Switch to enable eco mode.                                                                                                       |
 | `switch`     | Switch to enable fan swing.                                                                                                      |
+
+Real Feel is not currently listed as a selectable humidifier mode in Home Assistant.
 
 For a DDSX220, the device alarm uses the API's `alarm_state`: integer `0` is
 off, integer `3` is on, and other or missing values are unknown. This mapping
@@ -130,12 +141,12 @@ https://github.com/MiguelCosta/Dehumidifier_Comfee_Card
 [add-integration]: https://my.home-assistant.io/redirect/config_flow_start?domain=delonghi_dehumidifier_api
 [add-integration-badge]: https://my.home-assistant.io/badges/config_flow_start.svg
 [hacs]: https://hacs.xyz
-[hacs-download]: https://hacs.xyz/docs/setup/download
-[hacsbadge]: https://img.shields.io/badge/HACS-Default-blue.svg?style=flat
+[hacs-custom]: https://hacs.xyz/docs/faq/custom_repositories/
+[hacs-download]: https://hacs.xyz/docs/use/download/download/
+[hacs-setup]: https://hacs.xyz/docs/use/configuration/basic/
+[hacsbadge]: https://img.shields.io/badge/HACS-Custom-blue.svg?style=flat
 [ha-logs]: https://my.home-assistant.io/redirect/logs
 [ha-logs-badge]: https://my.home-assistant.io/badges/logs.svg
 [ha-service]: https://my.home-assistant.io/redirect/developer_call_service/?service=logger.set_level
 [ha-service-badge]: https://my.home-assistant.io/badges/developer_call_service.svg
 [maintenance-shield]: https://img.shields.io/badge/maintainer-Nenad%20Bogojević-blue.svg?style=flat
-[releases-shield]: https://img.shields.io/github/release/rtfpessoa/homeassistant-delonghi-dehumidifier.svg?style=flat
-[releases]: https://github.com/rtfpessoa/homeassistant-delonghi-dehumidifier/releases
