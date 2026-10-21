@@ -23,6 +23,8 @@ Once the integration is installed, you can add it to the Home Assistant by going
 2. Clone this repository.
 3. Copy the `custom_components/delonghi_dehumidifier_api` folder into your Home Assistant's `custom_components` folder.
 
+The automated tests cover Home Assistant 2025.2.4 and 2026.10.2 with a mocked cloud API.
+
 ### Configuring
 
 1. Add `DeLonghi Dehumidifier (API)` integration via UI.
