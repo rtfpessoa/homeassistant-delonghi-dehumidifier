@@ -947,7 +947,11 @@ class APIClient:
         """
         device_properties = await self.get_properties()
         return next(
-            (prop.get("value") for prop in device_properties if prop.get("name") == name),
+            (
+                prop.get("value")
+                for prop in device_properties
+                if prop.get("name") == name
+            ),
             None,
         )
 
