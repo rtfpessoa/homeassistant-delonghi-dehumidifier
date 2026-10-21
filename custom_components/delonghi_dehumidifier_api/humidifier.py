@@ -11,8 +11,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .client import MODE_BY_NAME, APIClient, Mode, Status
+from .client import MODE_BY_NAME, APIClient, InvalidCredentialsError, Mode, Status
 from .const import DOMAIN
+from .entity import AuthAvailabilityEntity
 from .utils import fetch_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ async def async_setup_entry(
     async_add_entities([DehumidifierEntity(device_dsn, device_info, client)])
 
 
-class DehumidifierEntity(HumidifierEntity):
+class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
     """Dehumidifer entity for DeLonghi dehumidifier."""
 
     _attr_should_poll = True
@@ -63,16 +64,22 @@ class DehumidifierEntity(HumidifierEntity):
         _LOGGER.debug("Initialized %s", self._attr_unique_id)
 
     async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
         await self.async_update()
 
     async def async_update(self) -> None:
         """Handle the event when the device status changes."""
         _LOGGER.debug("Updating %s", self._attr_unique_id)
-        device_mode = await self.client.get_device_mode()
-        self._attr_mode = device_mode.name if device_mode is not None else None
-        self._attr_target_humidity = await self.client.get_humidity_setpoint()
-        self._attr_current_humidity = await self.client.get_current_humidity()
-        device_status = await self.client.get_device_status()
+        try:
+            device_mode = await self.client.get_device_mode()
+            self._attr_mode = device_mode.name if device_mode is not None else None
+            self._attr_target_humidity = await self.client.get_humidity_setpoint()
+            self._attr_current_humidity = await self.client.get_current_humidity()
+            device_status = await self.client.get_device_status()
+        except InvalidCredentialsError:
+            self._attr_available = False
+            return
+        self._attr_available = True
         self._attr_is_on = None if device_status is None else device_status == Status.ON
         _LOGGER.debug(
             "Updated %s with %s",

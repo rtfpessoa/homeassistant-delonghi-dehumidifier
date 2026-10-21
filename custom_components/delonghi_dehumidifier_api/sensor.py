@@ -26,8 +26,16 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .client import APIClient, FilterStatus, Mode, OffOnStatus, Status
+from .client import (
+    APIClient,
+    FilterStatus,
+    InvalidCredentialsError,
+    Mode,
+    OffOnStatus,
+    Status,
+)
 from .const import DOMAIN
+from .entity import AuthAvailabilityEntity
 from .utils import fetch_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -191,7 +199,7 @@ def get_and_extract_enum_name(
     return wrapper
 
 
-class GenericSensor(SensorEntity):
+class GenericSensor(AuthAvailabilityEntity, SensorEntity):
     """Current environment humidity sensor."""
 
     _attr_should_poll = True
@@ -227,6 +235,7 @@ class GenericSensor(SensorEntity):
 
     async def async_added_to_hass(self) -> None:
         """Call when the entity is added to Home Assistant."""
+        await super().async_added_to_hass()
         await self.async_update()
 
     async def async_update(self):
@@ -240,7 +249,12 @@ class GenericSensor(SensorEntity):
             None
 
         """
-        self._attr_native_value = await self._get_value()
+        try:
+            self._attr_native_value = await self._get_value()
+        except InvalidCredentialsError:
+            self._attr_available = False
+            return
+        self._attr_available = True
         _LOGGER.debug(
             "Updated %s with %s",
             self._attr_unique_id,

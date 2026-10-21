@@ -19,6 +19,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .client import APIClient, OffOnStatus
 from .const import DOMAIN
+from .entity import AuthAvailabilityEntity
 from .utils import fetch_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ async def async_setup_entry(
     )
 
 
-class GenericOffOnSwitchSensor(SwitchEntity):
+class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
     """Switch entity representing a generic on/off switch sensor for a Dehumidifier."""
 
     _attr_should_poll = True

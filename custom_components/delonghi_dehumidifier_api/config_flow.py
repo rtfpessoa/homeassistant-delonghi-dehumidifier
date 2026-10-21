@@ -8,14 +8,19 @@ from typing import Any
 import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlow
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigEntryState,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import aiohttp_client
 
 from .client import APIClient, InvalidCredentialsError
-from .const import DOMAIN
+from .const import DOMAIN, RUNTIME_REAUTH_ID
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,6 +62,15 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         """Start reauthentication for the existing entry."""
+        runtime_id = entry_data.get(RUNTIME_REAUTH_ID)
+        if runtime_id is not None:
+            entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+            if (
+                entry is None
+                or entry.state is not ConfigEntryState.LOADED
+                or entry.runtime_data.reauth_id != runtime_id
+            ):
+                return self.async_abort(reason="reauth_cancelled")
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(

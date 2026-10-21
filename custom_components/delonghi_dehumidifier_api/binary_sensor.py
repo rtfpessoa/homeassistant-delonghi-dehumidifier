@@ -16,6 +16,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import DeLonghiDehumidifierConfigEntry
 from .client import APIClient
 from .const import DOMAIN
+from .entity import AuthAvailabilityEntity
 from .utils import fetch_device_info
 
 SCAN_INTERVAL = timedelta(minutes=1)
@@ -34,7 +35,7 @@ async def async_setup_entry(
     async_add_entities([DeviceAlarm(client, device_dsn, device_info)], True)
 
 
-class DeviceAlarm(BinarySensorEntity):
+class DeviceAlarm(AuthAvailabilityEntity, BinarySensorEntity):
     """Report known device alarm values without attributing a cause."""
 
     _attr_has_entity_name = True
@@ -44,7 +45,7 @@ class DeviceAlarm(BinarySensorEntity):
 
     def __init__(self, client: APIClient, device_dsn: str, device_info: DeviceInfo):
         """Initialize the alarm entity."""
-        self._client = client
+        self.client = client
         self._attr_name = "Device alarm"
         self._attr_unique_id = f"{DOMAIN}_{device_dsn}_device_alarm_binary_sensor"
         self._attr_device_info = device_info
@@ -53,7 +54,7 @@ class DeviceAlarm(BinarySensorEntity):
     async def async_update(self) -> None:
         """Interpret alarm values only for the observed model."""
         try:
-            properties = await self._client.get_properties()
+            properties = await self.client.get_properties()
         except Exception as err:  # noqa: BLE001
             # Any fetch failure must not leave a stale alarm state visible.
             if self._attr_available:
