@@ -11,7 +11,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .client import MODE_BY_NAME, APIClient, InvalidCredentialsError, Mode, Status
+from .client import (
+    MODE_BY_NAME,
+    MODE_BY_VALUE,
+    STATUS_BY_VALUE,
+    APIClient,
+    Mode,
+    Status,
+)
 from .const import DOMAIN
 from .entity import AuthAvailabilityEntity
 from .utils import fetch_device_info
@@ -19,6 +26,28 @@ from .utils import fetch_device_info
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=1)
+
+
+def _int_property(properties: list[dict], name: str) -> int | None:
+    """Read one integer from a single cloud snapshot."""
+    value = next(
+        (prop.get("value") for prop in properties if prop.get("name") == name), None
+    )
+    return None if value is None else int(value)
+
+
+def _snapshot_values(
+    properties: list[dict],
+) -> tuple[str | None, int | None, int | None, bool | None]:
+    """Interpret every humidifier attribute from the same complete snapshot."""
+    mode = MODE_BY_VALUE.get(_int_property(properties, "device_mode"))
+    status = STATUS_BY_VALUE.get(_int_property(properties, "device_status"))
+    return (
+        mode.name if mode is not None else None,
+        _int_property(properties, "humidity_setpoint"),
+        _int_property(properties, "current_humidity"),
+        None if status is None else status == Status.ON,
+    )
 
 
 async def async_setup_entry(
@@ -61,6 +90,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         self._attr_unique_id = f"{DOMAIN}_{device_dsn}_dehumidifier"
         self._attr_name = "Unit"
         self._attr_device_info = device_info
+        self._poll_generation = 0
         _LOGGER.debug("Initialized %s", self._attr_unique_id)
 
     async def async_added_to_hass(self) -> None:
@@ -70,17 +100,22 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
     async def async_update(self) -> None:
         """Handle the event when the device status changes."""
         _LOGGER.debug("Updating %s", self._attr_unique_id)
+        self._poll_generation += 1
+        generation = self._poll_generation
         try:
-            device_mode = await self.client.get_device_mode()
-            self._attr_mode = device_mode.name if device_mode is not None else None
-            self._attr_target_humidity = await self.client.get_humidity_setpoint()
-            self._attr_current_humidity = await self.client.get_current_humidity()
-            device_status = await self.client.get_device_status()
-        except InvalidCredentialsError:
-            self._attr_available = False
+            values = _snapshot_values(await self.client.get_properties())
+        except Exception as err:  # noqa: BLE001
+            self._poll_failed(generation, err, _LOGGER)
             return
+        if generation != self._poll_generation:
+            return
+        (
+            self._attr_mode,
+            self._attr_target_humidity,
+            self._attr_current_humidity,
+            self._attr_is_on,
+        ) = values
         self._attr_available = True
-        self._attr_is_on = None if device_status is None else device_status == Status.ON
         _LOGGER.debug(
             "Updated %s with %s",
             self._attr_unique_id,
