@@ -104,6 +104,8 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
         """Turn the switch on."""
         _LOGGER.debug("Turning on %s", self._attr_unique_id)
         async with self._command_lock:
+            # A pending skip belongs to an earlier command.
+            self._skip_next_poll = False
             self._command_generation += 1
             await self._set_status(OffOnStatus.ON)
             self._last_successful_command_generation = self._command_generation
@@ -116,6 +118,8 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
         """Turn the switch off."""
         _LOGGER.debug("Turning off %s", self._attr_unique_id)
         async with self._command_lock:
+            # A pending skip belongs to an earlier command.
+            self._skip_next_poll = False
             self._command_generation += 1
             await self._set_status(OffOnStatus.OFF)
             self._last_successful_command_generation = self._command_generation
