@@ -68,6 +68,7 @@ async def async_setup_entry(
                 SensorDeviceClass.HUMIDITY,
                 state_class=SensorStateClass.MEASUREMENT,
                 unit_of_measurement=PERCENTAGE,
+                entity_category=None,
             ),
             GenericSensor(
                 device_dsn,
@@ -107,6 +108,7 @@ async def async_setup_entry(
                 SensorDeviceClass.TEMPERATURE,
                 state_class=SensorStateClass.MEASUREMENT,
                 unit_of_measurement=UnitOfTemperature.CELSIUS,
+                entity_category=None,
             ),
             GenericSensor(
                 device_dsn,
@@ -194,7 +196,6 @@ class GenericSensor(SensorEntity):
 
     _attr_should_poll = True
     _attr_has_entity_name = True
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
@@ -207,6 +208,7 @@ class GenericSensor(SensorEntity):
         state_class: SensorStateClass | None = None,
         unit_of_measurement: str | None = None,
         options: list[str] | None = None,
+        entity_category: EntityCategory | None = EntityCategory.DIAGNOSTIC,
     ) -> None:
         """Initialize."""
         self.client = client
@@ -217,6 +219,7 @@ class GenericSensor(SensorEntity):
         self._attr_device_info = device_info
         self._get_value = get_value
         self._attr_device_class = device_class
+        self._attr_entity_category = entity_category
         self._attr_state_class = state_class
         self._attr_native_unit_of_measurement = unit_of_measurement
         self._attr_options = options

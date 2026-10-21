@@ -7,7 +7,6 @@ from typing import Any
 from homeassistant.components.humidifier import HumidifierDeviceClass, HumidifierEntity
 from homeassistant.components.humidifier.const import HumidifierEntityFeature
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -39,7 +38,6 @@ class DehumidifierEntity(HumidifierEntity):
 
     _attr_should_poll = True
     _attr_has_entity_name = True
-    _attr_entity_category = EntityCategory.CONFIG
     _attr_device_class = HumidifierDeviceClass.DEHUMIDIFIER
     _attr_max_humidity = 100
     _attr_min_humidity = 0
