@@ -56,6 +56,7 @@ async def device_with_missing_properties(hass):
     entry.add_to_hass(hass)
     assert await async_setup_component(hass, "homeassistant", {})
     with (
+        patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
         patch.object(
             APIClient, "get_request", AsyncMock(side_effect=get_properties_request)
         ) as get_request,

@@ -101,6 +101,7 @@ async def setup_entities(hass, request):
     ]
     with patch.multiple(
         APIClient,
+        authenticate=AsyncMock(return_value=True),
         get_first_device=AsyncMock(return_value="test-dsn"),
         get_properties=AsyncMock(return_value=properties),
     ):
