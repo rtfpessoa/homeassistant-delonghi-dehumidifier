@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Coroutine
-from datetime import timedelta
+import asyncio
 import logging
 import re
+import time
+from collections.abc import Callable, Coroutine
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
@@ -44,6 +46,7 @@ async def async_setup_entry(
                 "Eco Mode",
                 await client.get_eco(),
                 client.set_eco,
+                client.get_eco,
             ),
             GenericOffOnSwitchSensor(
                 device_dsn,
@@ -52,6 +55,7 @@ async def async_setup_entry(
                 "Swing Mode",
                 await client.get_swing(),
                 client.set_swing,
+                client.get_swing,
             ),
         ]
     )
@@ -72,6 +76,7 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
         type_name: str,
         status: OffOnStatus | None,
         set_status: Callable[[OffOnStatus], Coroutine[Any, Any, dict[Any, Any]]],
+        get_status: Callable[[], Coroutine[Any, Any, OffOnStatus | None]] | None = None,
     ) -> None:
         """Initialize."""
         self.client = client
@@ -82,6 +87,12 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
         self._attr_name = type_name
         self._attr_device_info = device_info
         self._set_status = set_status
+        self._get_status = get_status
+        self._command_lock = asyncio.Lock()
+        self._command_generation = 0
+        self._last_successful_command_generation = 0
+        self._last_command_completed = None
+        self._skip_next_poll = False
         _LOGGER.debug("Initialized %s", self._attr_unique_id)
 
     @property
@@ -92,11 +103,67 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
     async def async_turn_on(self, **kwargs):
         """Turn the switch on."""
         _LOGGER.debug("Turning on %s", self._attr_unique_id)
-        await self._set_status(OffOnStatus.ON)
-        self._is_on = True
+        async with self._command_lock:
+            self._command_generation += 1
+            await self._set_status(OffOnStatus.ON)
+            self._last_successful_command_generation = self._command_generation
+            self._last_command_completed = time.monotonic()
+            self._attr_available = True
+            self._is_on = True
+            self._skip_next_poll = True
 
     async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
         _LOGGER.debug("Turning off %s", self._attr_unique_id)
-        await self._set_status(OffOnStatus.OFF)
-        self._is_on = False
+        async with self._command_lock:
+            self._command_generation += 1
+            await self._set_status(OffOnStatus.OFF)
+            self._last_successful_command_generation = self._command_generation
+            self._last_command_completed = time.monotonic()
+            self._attr_available = True
+            self._is_on = False
+            self._skip_next_poll = True
+
+    async def async_update(self) -> None:
+        """Read cloud state unless its snapshot predates the last command."""
+        if self._get_status is None:
+            return
+        if self._command_lock.locked():
+            return
+        # Home Assistant refreshes a switch immediately after a command.
+        # Keep the accepted state and avoid waiting for an unrelated read.
+        if self._skip_next_poll:
+            self._skip_next_poll = False
+            return
+
+        generation = self._command_generation
+        try:
+            status = await self._get_status()
+        except Exception as err:  # noqa: BLE001
+            if generation < self._last_successful_command_generation:
+                # HA skips its automatic refresh while this poll is running.
+                if not self._command_lock.locked():
+                    self._skip_next_poll = False
+                return
+            # A failed poll must not leave an old state displayed.
+            if self.available:
+                _LOGGER.warning(
+                    "Unable to update %s (%s)", self.name, type(err).__name__
+                )
+            self._attr_available = False
+            return
+
+        if generation != self._command_generation:
+            # HA skips its automatic refresh while this poll is running.
+            if not self._command_lock.locked():
+                self._skip_next_poll = False
+            return
+
+        snapshot_started = self.client.device_properties_request_started
+        if self._last_command_completed is not None and (
+            snapshot_started is None or snapshot_started <= self._last_command_completed
+        ):
+            return
+
+        self._attr_available = True
+        self._is_on = None if status is None else status == OffOnStatus.ON
