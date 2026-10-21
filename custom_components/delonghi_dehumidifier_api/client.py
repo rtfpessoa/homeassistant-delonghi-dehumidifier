@@ -353,6 +353,7 @@ class APIClient:
         self.token_expiry = time.time()
         self.device_properties = None
         self.device_properties_timestamp = 0.0
+        self.device_properties_request_started = None
         self.device_dsn = None
 
     async def authenticate(self) -> bool:
@@ -1018,6 +1019,7 @@ class APIClient:
             return self.device_properties
 
         device_dsn = await self.get_first_device()
+        request_started = time.monotonic()
         device_properties = await self.get_request(
             f"apiv1/dsns/{device_dsn}/properties.json"
         )
@@ -1025,6 +1027,7 @@ class APIClient:
         self.device_properties = [
             device_property.get("property") for device_property in device_properties
         ]
+        self.device_properties_request_started = request_started
         self.device_properties_timestamp = time.time()
 
         return self.device_properties
