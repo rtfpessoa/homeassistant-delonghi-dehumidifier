@@ -35,6 +35,18 @@ _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(minutes=1)
 
 
+def get_temperature_celsius(
+    get_current_value: Callable[[], Coroutine[Any, Any, int | None]],
+) -> Callable[[], Coroutine[Any, Any, float | None]]:
+    """Convert the API's tenths of a degree Celsius to degrees Celsius."""
+
+    async def wrapper() -> float | None:
+        value = await get_current_value()
+        return None if value is None else value / 10
+
+    return wrapper
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry[APIClient],
@@ -91,20 +103,20 @@ async def async_setup_entry(
                 device_info,
                 client,
                 "Room Temperature",
-                client.get_room_temp,
+                get_temperature_celsius(client.get_room_temp),
                 SensorDeviceClass.TEMPERATURE,
                 state_class=SensorStateClass.MEASUREMENT,
-                unit_of_measurement=UnitOfTemperature.FAHRENHEIT,
+                unit_of_measurement=UnitOfTemperature.CELSIUS,
             ),
             GenericSensor(
                 device_dsn,
                 device_info,
                 client,
                 "Heat Exchanger Temperature",
-                client.get_heat_exchanger_temp,
+                get_temperature_celsius(client.get_heat_exchanger_temp),
                 SensorDeviceClass.TEMPERATURE,
                 state_class=SensorStateClass.MEASUREMENT,
-                unit_of_measurement=UnitOfTemperature.FAHRENHEIT,
+                unit_of_measurement=UnitOfTemperature.CELSIUS,
             ),
             GenericSensor(
                 device_dsn,
