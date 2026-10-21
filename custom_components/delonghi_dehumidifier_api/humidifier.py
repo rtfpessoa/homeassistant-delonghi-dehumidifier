@@ -1,7 +1,7 @@
 """Adds dehumidifer entity for each dehumidifer appliance."""
 
-from datetime import timedelta
 import logging
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.humidifier import HumidifierDeviceClass, HumidifierEntity
@@ -42,7 +42,8 @@ class DehumidifierEntity(HumidifierEntity):
     _attr_max_humidity = 100
     _attr_min_humidity = 0
     _attr_supported_features = HumidifierEntityFeature.MODES
-    _attr_available_modes = [
+    # Keep Home Assistant's instance-attribute typing and the existing shared list.
+    _attr_available_modes = [  # noqa: RUF012
         Mode.DEHUMIDIFY.name,
         Mode.DRY_CLOTHES.name,
         Mode.PURIFIER.name,

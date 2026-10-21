@@ -1,15 +1,15 @@
 """Module providing a client for interacting with the DeLonghi dehumidifier API."""
 
 import base64
-from datetime import datetime
-from enum import Enum
 import json
 import logging
 import time
-from typing import Final
 import urllib.parse
-import aiohttp
+from datetime import datetime
+from enum import Enum
+from typing import Final
 
+import aiohttp
 from homeassistant.exceptions import HomeAssistantError
 
 # API Docs: https://docs.aylanetworks.com/reference
@@ -367,9 +367,7 @@ class APIClient:
 
         """
         access_token = await self.get_access_token()
-        if access_token is None or access_token == "":
-            return False
-        return True
+        return not (access_token is None or access_token == "")
 
     async def get_product_name(self) -> str:
         """Retrieve the pretty product name defined by the user when setting up the device.
