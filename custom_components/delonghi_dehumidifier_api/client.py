@@ -396,37 +396,34 @@ class APIClient:
         """
         return await self.get_str_property("hardware_version")
 
-    async def get_current_humidity(self) -> int:
+    async def get_current_humidity(self) -> int | None:
         """Retrieve the current humidity property of the dehumidifier.
 
         Returns:
           int: The current humidity property value as an integer between 0 and 100.
 
         """
-        current_humidity = await self.get_int_property("current_humidity")
-        return int(current_humidity)
+        return await self.get_int_property("current_humidity")
 
-    async def get_humidity_setpoint(self) -> int:
+    async def get_humidity_setpoint(self) -> int | None:
         """Retrieve the humidity setpoint property of the dehumidifier.
 
         Returns:
           int: The humidity setpoint property value as an integer between 0 and 100.
 
         """
-        humidity_setpoint = await self.get_int_property("humidity_setpoint")
-        return int(humidity_setpoint)
+        return await self.get_int_property("humidity_setpoint")
 
-    async def get_current_speed(self) -> int:
+    async def get_current_speed(self) -> int | None:
         """Retrieve the current speed property of the dehumidifier.
 
         Returns:
           int: The current speed property value as an integer.
 
         """
-        current_speed = await self.get_int_property("current_speed")
-        return int(current_speed)
+        return await self.get_int_property("current_speed")
 
-    async def get_device_mode(self) -> Mode:
+    async def get_device_mode(self) -> Mode | None:
         """Retrieve the device mode property of the dehumidifier.
 
         Returns:
@@ -434,9 +431,9 @@ class APIClient:
 
         """
         device_mode = await self.get_int_property("device_mode")
-        return MODE_BY_VALUE[device_mode]
+        return MODE_BY_VALUE.get(device_mode)
 
-    async def get_device_status(self) -> Status:
+    async def get_device_status(self) -> Status | None:
         """Retrieve the device status property of the dehumidifier.
 
         Returns:
@@ -444,9 +441,9 @@ class APIClient:
 
         """
         device_status = await self.get_int_property("device_status")
-        return STATUS_BY_VALUE[device_status]
+        return STATUS_BY_VALUE.get(device_status)
 
-    async def get_filter_change_alarm(self) -> OffOnStatus:
+    async def get_filter_change_alarm(self) -> OffOnStatus | None:
         """Retrieve the filter change alarm property of the dehumidifier.
 
         Returns:
@@ -454,9 +451,9 @@ class APIClient:
 
         """
         filter_change_alarm = await self.get_int_property("filter_change_alarm")
-        return OFF_ON_STATUS_BY_VALUE[filter_change_alarm]
+        return OFF_ON_STATUS_BY_VALUE.get(filter_change_alarm)
 
-    async def get_filter_life(self) -> int:
+    async def get_filter_life(self) -> int | None:
         """Retrieve the filter life property of the dehumidifier.
 
         Returns:
@@ -465,7 +462,7 @@ class APIClient:
         """
         return await self.get_int_property("filter_life")
 
-    async def get_filter_status(self) -> FilterStatus:
+    async def get_filter_status(self) -> FilterStatus | None:
         """Retrieve the filter status property of the dehumidifier.
 
         Returns:
@@ -473,9 +470,9 @@ class APIClient:
 
         """
         filter_status = await self.get_int_property("filter_status")
-        return FILTER_STATUS_BY_VALUE[filter_status]
+        return FILTER_STATUS_BY_VALUE.get(filter_status)
 
-    async def get_heat_exchanger_temp(self) -> int:
+    async def get_heat_exchanger_temp(self) -> int | None:
         """Retrieve the heat exchanger temperature property of the dehumidifier.
 
         Returns:
@@ -484,7 +481,7 @@ class APIClient:
         """
         return await self.get_int_property("heat_exchanger_temp")
 
-    async def get_room_temp(self) -> int:
+    async def get_room_temp(self) -> int | None:
         """Retrieve the room temperature property of the dehumidifier.
 
         Returns:
@@ -493,7 +490,7 @@ class APIClient:
         """
         return await self.get_int_property("room_temp")
 
-    async def get_rotation_speed(self) -> int:
+    async def get_rotation_speed(self) -> int | None:
         """Retrieve the rotation speed property of the dehumidifier.
 
         Returns:
@@ -502,7 +499,7 @@ class APIClient:
         """
         return await self.get_int_property("rotation_speed")
 
-    async def get_swing(self) -> OffOnStatus:
+    async def get_swing(self) -> OffOnStatus | None:
         """Retrieve the swing property of the dehumidifier.
 
         Returns:
@@ -510,9 +507,9 @@ class APIClient:
 
         """
         swing = await self.get_int_property("swing")
-        return OFF_ON_STATUS_BY_VALUE[swing]
+        return OFF_ON_STATUS_BY_VALUE.get(swing)
 
-    async def get_eco(self) -> OffOnStatus:
+    async def get_eco(self) -> OffOnStatus | None:
         """Retrieve the eco property of the dehumidifier.
 
         Returns:
@@ -520,7 +517,7 @@ class APIClient:
 
         """
         eco = await self.get_int_property("set_eco")
-        return OFF_ON_STATUS_BY_VALUE[eco]
+        return OFF_ON_STATUS_BY_VALUE.get(eco)
 
     async def set_status(self, status: Status) -> dict:
         """Set the operation status.
@@ -949,13 +946,14 @@ class APIClient:
 
         """
         device_properties = await self.get_properties()
-        device_property = [
-            device_property
-            for device_property in device_properties
-            if device_property.get("name") == name
-        ][0]
-
-        return device_property.get("value")
+        return next(
+            (
+                prop.get("value")
+                for prop in device_properties
+                if prop.get("name") == name
+            ),
+            None,
+        )
 
     async def get_str_property(self, name: str) -> str:
         """Retrieve the str value of a specific property from the device.
@@ -969,7 +967,7 @@ class APIClient:
         """
         return str(await self.get_property(name))
 
-    async def get_int_property(self, name: str) -> int:
+    async def get_int_property(self, name: str) -> int | None:
         """Retrieve the int value of a specific property from the device.
 
         Args:
@@ -979,7 +977,8 @@ class APIClient:
           The value of the specified property.
 
         """
-        return int(await self.get_property(name))
+        value = await self.get_property(name)
+        return None if value is None else int(value)
 
     async def get_properties(self) -> dict:
         """Retrieve the properties of the device.
