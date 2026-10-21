@@ -5,7 +5,7 @@ pytest>=8.3.4
 pytest-cov>=6.0.0
 pytest-homeassistant-custom-component>=0.13.214
 tzdata
-ruff>=0.9.7
+ruff==0.17.1
 
 # flake8~=6.1
 # flake8-docstrings~=1.7
