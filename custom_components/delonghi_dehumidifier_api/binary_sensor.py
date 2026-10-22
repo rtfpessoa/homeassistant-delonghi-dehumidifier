@@ -51,7 +51,7 @@ class DeviceAlarm(AuthAvailabilityEntity, BinarySensorEntity):
         self._attr_device_info = device_info
         self._attr_is_on = None
 
-    async def async_update(self) -> None:
+    async def _async_update(self, *, after_action: bool) -> None:
         """Interpret alarm values only for the observed model."""
         try:
             properties = await self.client.get_properties()

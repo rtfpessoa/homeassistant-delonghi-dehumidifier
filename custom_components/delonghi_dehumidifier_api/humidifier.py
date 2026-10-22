@@ -129,6 +129,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         self._completed_poll_generation = 0
         self._refresh_handle: asyncio.Handle | None = None
         self._removed = False
+        self._lifetime_generation = 0
         self._tested_device = False
         self._last_observed_mode: str | None = None
         self._activity_mode: str | None = None
@@ -144,6 +145,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         _LOGGER.debug("Initialized %s", self._attr_unique_id)
 
     async def async_added_to_hass(self) -> None:
+        self._removed = False
         await super().async_added_to_hass()
         for language in ("en", "de"):
             self._activity_translations[language] = await async_get_translations(
@@ -158,6 +160,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
     def _cancel_refresh(self) -> None:
         """Do not schedule follow-up work after the entity is removed."""
         self._removed = True
+        self._lifetime_generation += 1
         self._clear_pending()
         if self._refresh_handle is not None:
             self._refresh_handle.cancel()
@@ -175,7 +178,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
 
         self._refresh_handle = self.hass.loop.call_soon(refresh)
 
-    async def async_update(self) -> None:
+    async def _async_update(self, *, after_action: bool) -> None:
         """Handle the event when the device status changes."""
         _LOGGER.debug("Updating %s", self._attr_unique_id)
         self._poll_generation += 1
@@ -282,23 +285,26 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
             raise ServiceValidationError(f"Unsupported dehumidifier mode: {mode!r}")
         tested_device = False
         source_mode: str | None = None
+        lifetime = self._lifetime_generation
 
         async def guard() -> None:
             nonlocal tested_device, source_mode
             tested_device = self._tested_device
+            if tested_device:
+                self._ensure_not_removed(lifetime)
             if tested_device and target == Mode.DEHUMIDIFY:
-                source_mode = await self._fresh_dehumidify_source()
+                source_mode = await self._fresh_dehumidify_source(lifetime)
 
         async def send() -> dict:
             if not tested_device:
                 return await self.client.set_mode(target)
-            return await self._send_tested_mode(target, source_mode)
+            return await self._send_tested_mode(target, source_mode, lifetime)
 
         await self.client.humidifier_commands.run(send, guard=guard)
 
-    def _ensure_not_removed(self) -> None:
+    def _ensure_not_removed(self, lifetime: int) -> None:
         """Reject a queued request after the entity has been unloaded."""
-        if self._removed:
+        if self._removed or self._lifetime_generation != lifetime:
             raise ServiceValidationError(
                 "The device is no longer available. Reload the integration and try again.",
                 translation_domain=DOMAIN,
@@ -313,9 +319,9 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
             translation_key="real_feel_mode_not_ready",
         )
 
-    async def _fresh_dehumidify_source(self) -> str:
+    async def _fresh_dehumidify_source(self, lifetime: int) -> str:
         """Choose the Dehumidify route using a post-lock cloud snapshot."""
-        self._ensure_not_removed()
+        self._ensure_not_removed(lifetime)
         self._expire_due_pending()
         read_started = self.hass.loop.time()
         deadline = self._pending_deadline
@@ -330,7 +336,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
                 translation_domain=DOMAIN,
                 translation_key="real_feel_read_failed",
             ) from None
-        self._ensure_not_removed()
+        self._ensure_not_removed(lifetime)
         if deadline is not None and read_started < deadline <= self.hass.loop.time():
             self._expire_due_pending()
             raise self._mode_not_ready()
@@ -346,16 +352,19 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
             raise self._mode_not_ready()
         return current
 
-    async def _send_tested_mode(self, target: Mode, source: str | None) -> dict:
+    async def _send_tested_mode(
+        self, target: Mode, source: str | None, lifetime: int
+    ) -> dict:
         """Attempt one mode command and keep conflicting echoes pending."""
-        self._ensure_not_removed()
+        self._ensure_not_removed(lifetime)
         self._begin_pending(target.name, source or self._last_observed_mode)
         try:
             if target == Mode.REAL_FEEL or source == Mode.REAL_FEEL.name:
                 return await self._send_real_feel(exit_mode=target == Mode.DEHUMIDIFY)
             return await self.client.set_mode(target)
         finally:
-            self._finish_pending()
+            if self._lifetime_generation == lifetime and not self._removed:
+                self._finish_pending()
 
     async def _send_real_feel(self, *, exit_mode: bool) -> dict:
         """Send a single non-redirecting request with a safe error on failure."""

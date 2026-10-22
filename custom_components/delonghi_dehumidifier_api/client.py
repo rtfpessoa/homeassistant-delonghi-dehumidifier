@@ -15,6 +15,7 @@ from uuid import uuid4
 import aiohttp
 from homeassistant.exceptions import HomeAssistantError
 
+from .action_refresh import ActionRefresh
 from .const import REAL_FEEL_ACTIVATION_PAYLOAD, REAL_FEEL_DEACTIVATION_PAYLOAD
 from .humidifier_commands import HumidifierCommands
 
@@ -359,12 +360,7 @@ class APIClient:
         self.token_expiry = time.time()
         self._token_request: asyncio.Task[str | None] | None = None
         self._token_waiters = 0
-        self._properties_request: asyncio.Task[list[dict]] | None = None
-        self._properties_waiters = 0
-        self._properties_generation = 0
-        self._properties_request_generation = 0
-        self._properties_idle = asyncio.Event()
-        self._properties_idle.set()
+        self._initialize_property_requests()
         self._closed = False
         self._invalid_credentials = False
         self.reauth_id = uuid4().hex
@@ -374,7 +370,25 @@ class APIClient:
         self.device_properties_timestamp = 0.0
         self.device_properties_request_started = None
         self.device_dsn = None
-        self.humidifier_commands = HumidifierCommands(self.invalidate_properties)
+        self.action_refresh = ActionRefresh(
+            self.invalidate_properties, self._can_refresh_after_action
+        )
+        self.humidifier_commands = HumidifierCommands(
+            self.invalidate_properties, self.action_refresh
+        )
+
+    def _initialize_property_requests(self) -> None:
+        """Set up the shared property request and its waiter coordination."""
+        self._properties_request: asyncio.Task[list[dict]] | None = None
+        self._properties_waiters = 0
+        self._properties_generation = 0
+        self._properties_request_generation = 0
+        self._properties_idle = asyncio.Event()
+        self._properties_idle.set()
+
+    def _can_refresh_after_action(self) -> bool:
+        """Avoid follow-up requests after shutdown or credential rejection."""
+        return not self._closed and not self._invalid_credentials
 
     async def authenticate(self) -> bool:
         """Authenticate with the DeLonghi service.
@@ -719,6 +733,7 @@ class APIClient:
     async def async_shutdown(self) -> None:
         """Cancel pending requests when the associated entry is unloaded."""
         self._closed = True
+        self.action_refresh.close()
         self._properties_idle.set()
         self.on_invalid_credentials = None
         requests = [

@@ -135,6 +135,12 @@ accepts a command, the switch initially shows the requested state; later updates
 show the state reported by the cloud, which may lag the device and does not
 confirm actuation.
 
+After a Home Assistant control action, the integration requests a shared cloud
+update about four seconds after the last action finishes. Rapid actions are
+combined into one update. Cloud delays or a failed request can make values take
+longer to change. Changes made outside Home Assistant are checked during normal
+one-minute polling.
+
 ## Troubleshooting
 
 To investigate tank alarms, switch synchronization or operating modes, download

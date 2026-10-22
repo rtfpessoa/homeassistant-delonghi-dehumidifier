@@ -107,7 +107,11 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
             # A pending skip belongs to an earlier command.
             self._skip_next_poll = False
             self._command_generation += 1
-            await self._set_status(OffOnStatus.ON)
+            self.client.action_refresh.write_started()
+            try:
+                await self._set_status(OffOnStatus.ON)
+            finally:
+                self.client.action_refresh.write_finished()
             self._last_successful_command_generation = self._command_generation
             self._last_command_completed = time.monotonic()
             self._attr_available = True
@@ -121,14 +125,18 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
             # A pending skip belongs to an earlier command.
             self._skip_next_poll = False
             self._command_generation += 1
-            await self._set_status(OffOnStatus.OFF)
+            self.client.action_refresh.write_started()
+            try:
+                await self._set_status(OffOnStatus.OFF)
+            finally:
+                self.client.action_refresh.write_finished()
             self._last_successful_command_generation = self._command_generation
             self._last_command_completed = time.monotonic()
             self._attr_available = True
             self._is_on = False
             self._skip_next_poll = True
 
-    async def async_update(self) -> None:
+    async def _async_update(self, *, after_action: bool) -> None:
         """Read cloud state unless its snapshot predates the last command."""
         if self._get_status is None:
             return
@@ -136,9 +144,11 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
             return
         # Home Assistant refreshes a switch immediately after a command.
         # Keep the accepted state and avoid waiting for an unrelated read.
-        if self._skip_next_poll:
+        if self._skip_next_poll and not after_action:
             self._skip_next_poll = False
             return
+        if after_action:
+            self._skip_next_poll = False
 
         generation = self._command_generation
         try:

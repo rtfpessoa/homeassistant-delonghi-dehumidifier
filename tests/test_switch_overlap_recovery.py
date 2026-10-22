@@ -103,5 +103,5 @@ async def test_failed_overlapping_command_does_not_skip_next_scan(
     assert hass.states.get(switch).state == ("on" if first_value else "off")
 
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=2))
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert hass.states.get(switch).state == ("on" if second_value else "off")
