@@ -133,5 +133,11 @@
     "real_feel_enter_write_failed": {
       "message": "Die Anfrage für Real Feel ist fehlgeschlagen; das Gerät könnte sie erhalten haben. Prüfe die De'Longhi-App, bevor du es erneut versuchst."
     }
+  },
+  "common": {
+    "mode_activity_dehumidify": "Gemeldeter Modus: Entfeuchten",
+    "mode_activity_dry_clothes": "Gemeldeter Modus: Wäsche trocknen",
+    "mode_activity_purifier": "Gemeldeter Modus: Luftreinigung",
+    "mode_activity_real_feel": "Gemeldeter Modus: Real Feel"
   }
 }

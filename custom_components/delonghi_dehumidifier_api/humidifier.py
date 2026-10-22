@@ -7,11 +7,13 @@ from typing import Any
 
 from homeassistant.components.humidifier import HumidifierDeviceClass, HumidifierEntity
 from homeassistant.components.humidifier.const import HumidifierEntityFeature
+from homeassistant.components.logbook import async_log_entry
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.translation import async_get_translations
 
 from .client import (
     MODE_BY_NAME,
@@ -129,6 +131,8 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         self._removed = False
         self._tested_device = False
         self._last_observed_mode: str | None = None
+        self._activity_mode: str | None = None
+        self._activity_translations: dict[str, dict[str, str]] = {}
         self._pending_mode: str | None = None
         self._pending_source: str | None = None
         self._pending_earlier_modes: set[str] = set()
@@ -141,6 +145,10 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        for language in ("en", "de"):
+            self._activity_translations[language] = await async_get_translations(
+                self.hass, language, "common", [DOMAIN]
+            )
         self.async_on_remove(self._cancel_refresh)
         self.async_on_remove(
             self.client.humidifier_commands.subscribe_refresh(self._schedule_refresh)
@@ -214,6 +222,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         ) = values
         self._attr_mode = mode
         self._attr_available = True
+        self._record_mode_activity(mode)
         _LOGGER.debug(
             "Updated %s with %s",
             self._attr_unique_id,
@@ -224,6 +233,32 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
                 "is_on": self._attr_is_on,
             },
         )
+
+    def _record_mode_activity(self, mode: str | None) -> None:
+        """Record changes involving Real Feel only after an accepted cloud read."""
+        if (
+            self._removed
+            or not self.available
+            or mode not in self._attr_available_modes
+        ):
+            return
+        previous = self._activity_mode
+        self._activity_mode = mode
+        if (
+            previous is None
+            or previous == mode
+            or Mode.REAL_FEEL.name not in (previous, mode)
+        ):
+            return
+        language = (self.hass.config.language or "en").split("-")[0]
+        translations = self._activity_translations.get(
+            language, self._activity_translations["en"]
+        )
+        key = f"component.{DOMAIN}.common.mode_activity_{mode.lower()}"
+        if message := translations.get(key):
+            async_log_entry(
+                self.hass, self.name or "De'Longhi", message, entity_id=self.entity_id
+            )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the entity on."""
