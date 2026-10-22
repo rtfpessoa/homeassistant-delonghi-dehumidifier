@@ -9,7 +9,7 @@ from homeassistant.components.humidifier import HumidifierDeviceClass, Humidifie
 from homeassistant.components.humidifier.const import HumidifierEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -18,16 +18,41 @@ from .client import (
     MODE_BY_VALUE,
     STATUS_BY_VALUE,
     APIClient,
+    InvalidCredentialsError,
     Mode,
     Status,
 )
-from .const import DOMAIN
+from .const import DOMAIN, REAL_FEEL_ACTIVATION_PAYLOAD, REAL_FEEL_DEACTIVATION_PAYLOAD
 from .entity import AuthAvailabilityEntity
+from .real_feel import property_value, supports_real_feel
 from .utils import fetch_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=1)
+_PENDING_SECONDS = 120
+_ORDINARY_MODES = [Mode.DEHUMIDIFY.name, Mode.DRY_CLOTHES.name, Mode.PURIFIER.name]
+
+
+def _tested_device_mode(properties: list[dict]) -> str | None:
+    """Estimate the tested device's mode from its cloud command echo."""
+    if not supports_real_feel(properties):
+        return None
+    mode = property_value(properties, "device_mode")
+    if type(mode) is not int:
+        return None
+    if mode in (2, 3):
+        return MODE_BY_VALUE[mode].name
+    if mode != 1:
+        return None
+    command = property_value(properties, "activate_realfeel")
+    if type(command) is not str:
+        return None
+    if command == REAL_FEEL_ACTIVATION_PAYLOAD:
+        return Mode.REAL_FEEL.name
+    if command == REAL_FEEL_DEACTIVATION_PAYLOAD:
+        return Mode.DEHUMIDIFY.name
+    return None
 
 
 def _int_property(properties: list[dict], name: str) -> int | None:
@@ -39,13 +64,17 @@ def _int_property(properties: list[dict], name: str) -> int | None:
 
 
 def _snapshot_values(
-    properties: list[dict],
+    properties: list[dict], *, tested_device: bool = False
 ) -> tuple[str | None, int | None, int | None, bool | None]:
     """Interpret every humidifier attribute from the same complete snapshot."""
-    mode = MODE_BY_VALUE.get(_int_property(properties, "device_mode"))
+    if tested_device:
+        mode = _tested_device_mode(properties)
+    else:
+        legacy_mode = MODE_BY_VALUE.get(_int_property(properties, "device_mode"))
+        mode = legacy_mode.name if legacy_mode is not None else None
     status = STATUS_BY_VALUE.get(_int_property(properties, "device_status"))
     return (
-        mode.name if mode is not None else None,
+        mode,
         _int_property(properties, "humidity_setpoint"),
         _int_property(properties, "current_humidity"),
         None if status is None else status == Status.ON,
@@ -96,6 +125,14 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         self._completed_poll_generation = 0
         self._refresh_handle: asyncio.Handle | None = None
         self._removed = False
+        self._tested_device = False
+        self._last_observed_mode: str | None = None
+        self._pending_mode: str | None = None
+        self._pending_source: str | None = None
+        self._pending_earlier_modes: set[str] = set()
+        self._pending_deadline: float | None = None
+        self._pending_timer: asyncio.TimerHandle | None = None
+        self._pending_generation = 0
         _LOGGER.debug("Initialized %s", self._attr_unique_id)
 
     async def async_added_to_hass(self) -> None:
@@ -109,6 +146,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
     def _cancel_refresh(self) -> None:
         """Do not schedule follow-up work after the entity is removed."""
         self._removed = True
+        self._clear_pending()
         if self._refresh_handle is not None:
             self._refresh_handle.cancel()
             self._refresh_handle = None
@@ -132,7 +170,11 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         generation = self._poll_generation
         command_generation = self.client.humidifier_commands.generation
         try:
-            values = _snapshot_values(await self.client.get_properties())
+            properties = await self.client.get_properties()
+            supported = supports_real_feel(properties)
+            values = _snapshot_values(
+                properties, tested_device=self._tested_device or supported
+            )
         except Exception as err:  # noqa: BLE001
             if command_generation == self.client.humidifier_commands.generation:
                 self._poll_failed(generation, err, _LOGGER)
@@ -144,12 +186,29 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
             return
         if not self._accept_poll(generation):
             return
+        self._apply_snapshot(values, supported)
+
+    def _apply_snapshot(
+        self,
+        values: tuple[str | None, int | None, int | None, bool | None],
+        supported: bool,
+    ) -> None:
+        """Publish the accepted snapshot and its tested-device mode estimate."""
+        self._tested_device = self._tested_device or supported
+        self._attr_available_modes = (
+            [*_ORDINARY_MODES, Mode.REAL_FEEL.name] if supported else _ORDINARY_MODES
+        )
+        mode = values[0]
+        if self._tested_device:
+            self._last_observed_mode = mode
+            mode = self._mode_with_pending(mode)
         (
-            self._attr_mode,
+            _,
             self._attr_target_humidity,
             self._attr_current_humidity,
             self._attr_is_on,
         ) = values
+        self._attr_mode = mode
         self._attr_available = True
         _LOGGER.debug(
             "Updated %s with %s",
@@ -182,7 +241,182 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         target = MODE_BY_NAME.get(mode)
         if target is None:
             raise ServiceValidationError(f"Unsupported dehumidifier mode: {mode!r}")
-        await self.client.humidifier_commands.run(lambda: self.client.set_mode(target))
+        tested_device = False
+        source_mode: str | None = None
+
+        async def guard() -> None:
+            nonlocal tested_device, source_mode
+            tested_device = self._tested_device
+            if tested_device and target == Mode.DEHUMIDIFY:
+                source_mode = await self._fresh_dehumidify_source()
+
+        async def send() -> dict:
+            if not tested_device:
+                return await self.client.set_mode(target)
+            return await self._send_tested_mode(target, source_mode)
+
+        await self.client.humidifier_commands.run(send, guard=guard)
+
+    def _ensure_not_removed(self) -> None:
+        """Reject a queued request after the entity has been unloaded."""
+        if self._removed:
+            raise ServiceValidationError(
+                "The device is no longer available. Reload the integration and try again.",
+                translation_domain=DOMAIN,
+                translation_key="device_removed",
+            )
+
+    @staticmethod
+    def _mode_not_ready() -> ServiceValidationError:
+        return ServiceValidationError(
+            "The device mode is not ready. Wait for the De'Longhi app to sync, then try again.",
+            translation_domain=DOMAIN,
+            translation_key="real_feel_mode_not_ready",
+        )
+
+    async def _fresh_dehumidify_source(self) -> str:
+        """Choose the Dehumidify route using a post-lock cloud snapshot."""
+        self._ensure_not_removed()
+        self._expire_due_pending()
+        read_started = self.hass.loop.time()
+        deadline = self._pending_deadline
+        self.client.invalidate_properties()
+        try:
+            properties = await self.client.get_properties()
+        except InvalidCredentialsError:
+            raise
+        except Exception:  # noqa: BLE001 - do not expose cloud response details
+            raise HomeAssistantError(
+                "Unable to check the current device data. Check the connection and try again.",
+                translation_domain=DOMAIN,
+                translation_key="real_feel_read_failed",
+            ) from None
+        self._ensure_not_removed()
+        if deadline is not None and read_started < deadline <= self.hass.loop.time():
+            self._expire_due_pending()
+            raise self._mode_not_ready()
+        if not supports_real_feel(properties):
+            raise ServiceValidationError(
+                "This request requires a DDSX220 with firmware 1.0. "
+                "Check the device information and reload the integration.",
+                translation_domain=DOMAIN,
+                translation_key="real_feel_unsupported",
+            )
+        current = _tested_device_mode(properties)
+        if self._mode_with_pending(current) is None or current is None:
+            raise self._mode_not_ready()
+        return current
+
+    async def _send_tested_mode(self, target: Mode, source: str | None) -> dict:
+        """Attempt one mode command and keep conflicting echoes pending."""
+        self._ensure_not_removed()
+        self._begin_pending(target.name, source or self._last_observed_mode)
+        try:
+            if target == Mode.REAL_FEEL or source == Mode.REAL_FEEL.name:
+                return await self._send_real_feel(exit_mode=target == Mode.DEHUMIDIFY)
+            return await self.client.set_mode(target)
+        finally:
+            self._finish_pending()
+
+    async def _send_real_feel(self, *, exit_mode: bool) -> dict:
+        """Send a single non-redirecting request with a safe error on failure."""
+        try:
+            if exit_mode:
+                return await self.client.request_exit_real_feel()
+            return await self.client.request_enter_real_feel()
+        except InvalidCredentialsError:
+            raise
+        except Exception:  # noqa: BLE001 - avoid cloud response details
+            what = "exit request" if exit_mode else "request"
+            key = (
+                "real_feel_write_failed"
+                if exit_mode
+                else "real_feel_enter_write_failed"
+            )
+            raise HomeAssistantError(
+                f"The Real Feel {what} failed; the device may have received it. "
+                "Check the De'Longhi app before trying again.",
+                translation_domain=DOMAIN,
+                translation_key=key,
+            ) from None
+
+    def _clear_pending(self) -> None:
+        """Clear a mode request and prevent an older timeout from affecting a later one."""
+        self._pending_generation += 1
+        if self._pending_timer is not None:
+            self._pending_timer.cancel()
+            self._pending_timer = None
+        self._pending_mode = None
+        self._pending_source = None
+        self._pending_earlier_modes.clear()
+        self._pending_deadline = None
+
+    def _begin_pending(self, mode: str, source: str | None) -> None:
+        """Mark an attempted write unknown until the cloud catches up."""
+        earlier_modes = set(self._pending_earlier_modes)
+        if self._pending_mode is not None:
+            earlier_modes.add(self._pending_mode)
+        self._clear_pending()
+        self._pending_mode = mode
+        self._pending_source = source
+        self._pending_earlier_modes = earlier_modes
+        self._attr_mode = None
+        self.async_write_ha_state()
+
+    def _finish_pending(self) -> None:
+        """Bound a pending request after its write completes or fails."""
+        if self._removed:
+            return
+        self._pending_deadline = self.hass.loop.time() + _PENDING_SECONDS
+        generation = self._pending_generation
+        self._pending_timer = self.hass.loop.call_later(
+            _PENDING_SECONDS, self._pending_expired, generation
+        )
+        self._schedule_refresh()
+
+    def _pending_expired(self, generation: int) -> None:
+        """After the bounded wait, request a new snapshot rather than use the cache."""
+        if self._removed or generation != self._pending_generation:
+            return
+        self._pending_timer = None
+        self._poll_generation += 1
+        self._completed_poll_generation = self._poll_generation
+        self.client.invalidate_properties()
+        self._schedule_refresh()
+
+    def _expire_due_pending(self) -> None:
+        """Start the expiration refresh if the loop has not run its timer yet."""
+        if (
+            self._pending_deadline is not None
+            and self.hass.loop.time() >= self._pending_deadline
+            and self._pending_timer is not None
+        ):
+            self._pending_timer.cancel()
+            self._pending_expired(self._pending_generation)
+
+    def _mode_with_pending(self, observed: str | None) -> str | None:
+        """Suppress a conflicting echo while our request may still be syncing."""
+        if self._pending_mode is None:
+            return observed
+        if self._pending_deadline is None:
+            return None
+        if self.hass.loop.time() >= self._pending_deadline:
+            if self._pending_timer is not None:
+                self._expire_due_pending()
+                return None
+            self._clear_pending()
+            return observed
+        distinct_ordinary_mode = (
+            self._pending_source is not None
+            and observed in (Mode.DRY_CLOTHES.name, Mode.PURIFIER.name)
+            and observed != self._pending_source
+            and observed != self._pending_mode
+            and observed not in self._pending_earlier_modes
+        )
+        if observed == self._pending_mode or distinct_ordinary_mode:
+            self._clear_pending()
+            return observed
+        return None
 
     async def async_set_humidity(self, humidity: int) -> None:
         """Set new target humidity."""

@@ -68,7 +68,7 @@ This custom component creates following entities for the dehumidifier:
 
 | Platform     | Description                                                                                                                      |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `humidifier` | Dehumidifier entity with selectable modes `DEHUMIDIFY`, `DRY_CLOTHES`, and `PURIFIER`.                                           |
+| `humidifier` | Dehumidifier entity with selectable modes `DEHUMIDIFY`, `DRY_CLOTHES`, and `PURIFIER`; `REAL_FEEL` on the tested DDSX220 firmware. |
 | `sensor`     | Sensors for current relative humidity measured by dehumidifier.                                                                  |
 | `sensor`     | Sensors for target humidity set in the dehumidifier.                                                                             |
 | `sensor`     | Sensors for current speed.                                                                                                       |
@@ -86,37 +86,34 @@ This custom component creates following entities for the dehumidifier:
 | `switch`     | Switch to enable eco mode.                                                                                                       |
 | `switch`     | Switch to enable fan swing.                                                                                                      |
 
-Real Feel is not currently listed as a selectable humidifier mode in Home Assistant.
-On the tested DDSX220 with firmware 1.0, select Real Feel in the De'Longhi app,
-then use the **Request exit from Real Feel** configuration button to request its exit.
-Before the request the integration reads fresh cloud data and requires device
-mode 1 and the previously observed Real Feel activation command. If the
-conditions are not met, the request is rejected without sending a command. The
-cloud response may lag the appliance, and these comparisons do not establish the
-current mode or guarantee the request's effect. Check the appliance or De'Longhi
-app; the Home Assistant humidifier mode can remain inaccurate. Selecting
-`DEHUMIDIFY` on the humidifier alone did not always exit Real Feel on the tested
-appliance. The button's last-pressed timestamp records an attempt, including a
-rejected or failed request, and does not confirm its acceptance or effect.
+On a DDSX220 with firmware 1.0, the humidifier offers `REAL_FEEL` in its mode
+selector. Selecting `DEHUMIDIFY` while Real Feel is reported sends the tested
+exit request; otherwise the integration uses the ordinary mode command. Before
+selecting `DEHUMIDIFY`, the integration reads fresh cloud data and rejects the
+request if the identity or mode cannot be determined. Entering Real Feel and
+exiting to Dehumidify have been observed on one such device. Transitions involving
+Purifier have not been verified on the appliance.
 
-On the tested DDSX220 with firmware 1.0, the existing direct humidifier action
-can also request Real Feel. Its behavior on other devices and firmware versions
-has not been established. Replace the example entity ID with your own; this
-legacy action does not apply the button's fresh-data guard.
+The mode is a best-effort estimate based on the cloud's mode value and last
+command echo, not a confirmed appliance state. The cloud may lag the appliance,
+so check the appliance or De'Longhi app if the modes disagree. After a mode request,
+Home Assistant may show an unknown mode while waiting for a matching cloud update.
+After two minutes the integration requests another cloud update; a slow or failed
+read can leave the mode unknown or unavailable longer. A Dehumidify request may
+be rejected during the wait. A different ordinary mode reported by the cloud can
+end the wait early; this too is only an estimate. Cloud data can remain stale even
+after the wait. Changes from the app and the existing exit button do not start this
+waiting period.
 
-```yaml
-action: humidifier.set_mode
-target:
-  entity_id: humidifier.your_dehumidifier
-data:
-  mode: REAL_FEEL
-```
-
-Target the request button explicitly. Home Assistant excludes configuration
-buttons when a device or area is targeted, but targeting all buttons or labels
-assigned directly to the button can still invoke it. Other models and firmware
-versions do not receive this button. If the identity is unavailable during
-setup, reload the integration after it becomes available.
+The **Request exit from Real Feel** configuration button remains available for
+existing automations; it is hidden by default for new installations. Its
+last-pressed timestamp records an attempt, including a rejected or failed
+request, and does not confirm acceptance or effect. Target it explicitly:
+Home Assistant excludes configuration buttons when a device or area is targeted,
+but targeting all buttons or labels assigned directly to it can still invoke it.
+Other models and firmware versions do not receive this button or advertise Real
+Feel in the selector. The existing direct `REAL_FEEL` action remains available;
+its behavior on other devices and firmware versions has not been established.
 
 The default names of the integration's entities follow Home Assistant's
 system language. Their `friendly_name` state attributes can therefore change,

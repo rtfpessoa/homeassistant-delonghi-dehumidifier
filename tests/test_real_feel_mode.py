@@ -1,0 +1,567 @@
+"""Exercise the best-effort Real Feel mode through Home Assistant."""
+
+import asyncio
+from unittest.mock import patch
+
+import pytest
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity_component import async_update_entity
+
+from custom_components.delonghi_dehumidifier_api.const import (
+    DOMAIN,
+    REAL_FEEL_ACTIVATION_PAYLOAD,
+    REAL_FEEL_DEACTIVATION_PAYLOAD,
+)
+from tests import test_real_feel_buttons
+from tests.test_client_http import make_client
+
+cloud = test_real_feel_buttons.cloud
+setup = test_real_feel_buttons.setup
+button_id = test_real_feel_buttons.button_id
+
+
+def humidifier_id(hass):
+    return er.async_get(hass).async_get_entity_id(
+        "humidifier", DOMAIN, f"{DOMAIN}_test-dsn_dehumidifier"
+    )
+
+
+async def set_mode(hass, mode):
+    await hass.services.async_call(
+        "humidifier",
+        "set_mode",
+        {"entity_id": humidifier_id(hass), "mode": mode},
+        blocking=True,
+    )
+
+
+async def refresh(hass, cloud):
+    cloud[0].runtime_data.invalidate_properties()
+    await async_update_entity(hass, humidifier_id(hass))
+
+
+@pytest.mark.parametrize(
+    ("cloud", "expected_modes", "expected_mode"),
+    [
+        ({}, ["DEHUMIDIFY", "DRY_CLOTHES", "PURIFIER", "REAL_FEEL"], "REAL_FEEL"),
+        (
+            {"firmware_version": 1.0},
+            ["DEHUMIDIFY", "DRY_CLOTHES", "PURIFIER", "REAL_FEEL"],
+            "REAL_FEEL",
+        ),
+        (
+            {"firmware_version": "1"},
+            ["DEHUMIDIFY", "DRY_CLOTHES", "PURIFIER"],
+            "DEHUMIDIFY",
+        ),
+        (
+            {"firmware_version": True},
+            ["DEHUMIDIFY", "DRY_CLOTHES", "PURIFIER"],
+            "DEHUMIDIFY",
+        ),
+        (
+            {"appliance_model": "other"},
+            ["DEHUMIDIFY", "DRY_CLOTHES", "PURIFIER"],
+            "DEHUMIDIFY",
+        ),
+    ],
+    indirect=["cloud"],
+)
+async def test_mode_capability_is_limited_to_tested_identity(
+    hass, cloud, expected_modes, expected_mode
+):
+    """The existing entity is the selector and setup never sends a write."""
+    await setup(hass, cloud)
+    state = hass.states.get(humidifier_id(hass))
+    assert state.attributes["available_modes"] == expected_modes
+    assert state.attributes["mode"] == expected_mode
+    assert state.attributes["humidity"] == 55
+    cloud[4].assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("device_mode", "command", "expected"),
+    [
+        (1, REAL_FEEL_ACTIVATION_PAYLOAD, "REAL_FEEL"),
+        (1, REAL_FEEL_DEACTIVATION_PAYLOAD, "DEHUMIDIFY"),
+        (2, REAL_FEEL_ACTIVATION_PAYLOAD, "DRY_CLOTHES"),
+        (3, REAL_FEEL_ACTIVATION_PAYLOAD, "PURIFIER"),
+        (1, "other", None),
+        (1, None, None),
+        (1, True, None),
+        ("1", REAL_FEEL_ACTIVATION_PAYLOAD, None),
+        (True, REAL_FEEL_ACTIVATION_PAYLOAD, None),
+        (100, REAL_FEEL_ACTIVATION_PAYLOAD, None),
+    ],
+)
+async def test_snapshot_mode_mapping(hass, cloud, device_mode, command, expected):
+    """Only exact known echoes are inferred; ordinary modes take precedence."""
+    await setup(hass, cloud)
+    cloud[1].update(device_mode=device_mode, activate_realfeel=command)
+    await refresh(hass, cloud)
+    state = hass.states.get(humidifier_id(hass))
+    assert state.attributes["mode"] == expected
+    assert state.attributes["current_humidity"] == 50
+
+
+@pytest.mark.parametrize(
+    "duplicate", ["device_mode", "activate_realfeel", "firmware_version"]
+)
+async def test_duplicate_values_are_unknown(hass, cloud, duplicate):
+    """Conflicting values cannot be treated as identity or mode evidence."""
+    await setup(hass, cloud)
+    records = cloud[2]()
+    records.append({"property": {"name": duplicate, "value": cloud[1][duplicate]}})
+    cloud[3].return_value = records
+    cloud[3].side_effect = None
+    await refresh(hass, cloud)
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
+    with pytest.raises(ServiceValidationError):
+        await set_mode(hass, "DEHUMIDIFY")
+    cloud[4].assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("source", "command", "property_name", "value", "options"),
+    [
+        (
+            1,
+            REAL_FEEL_ACTIVATION_PAYLOAD,
+            "activate_realfeel",
+            REAL_FEEL_DEACTIVATION_PAYLOAD,
+            {"allow_redirects": False},
+        ),
+        (1, REAL_FEEL_DEACTIVATION_PAYLOAD, "device_mode", 1, {}),
+        (2, REAL_FEEL_ACTIVATION_PAYLOAD, "device_mode", 1, {}),
+        (3, REAL_FEEL_ACTIVATION_PAYLOAD, "device_mode", 1, {}),
+    ],
+)
+async def test_dehumidify_routes_one_fresh_guarded_write(
+    hass, cloud, source, command, property_name, value, options
+):
+    await setup(hass, cloud)
+    cloud[1].update(device_mode=source, activate_realfeel=command)
+    reads = cloud[3].await_count
+    await set_mode(hass, "DEHUMIDIFY")
+    assert cloud[3].await_count >= reads + 1
+    cloud[4].assert_awaited_once_with(
+        f"apiv1/dsns/test-dsn/properties/{property_name}/datapoints.json",
+        {"datapoint": {"value": value}},
+        **options,
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "property_name", "value"),
+    [
+        (1, "REAL_FEEL", "activate_realfeel", REAL_FEEL_ACTIVATION_PAYLOAD),
+        (2, "REAL_FEEL", "activate_realfeel", REAL_FEEL_ACTIVATION_PAYLOAD),
+        (3, "REAL_FEEL", "activate_realfeel", REAL_FEEL_ACTIVATION_PAYLOAD),
+        (1, "DRY_CLOTHES", "device_mode", 2),
+        (1, "PURIFIER", "device_mode", 3),
+    ],
+)
+async def test_other_modes_keep_one_legacy_write(
+    hass, cloud, source, target, property_name, value
+):
+    await setup(hass, cloud)
+    cloud[1]["device_mode"] = source
+    await set_mode(hass, target)
+    cloud[4].assert_awaited_once_with(
+        f"apiv1/dsns/test-dsn/properties/{property_name}/datapoints.json",
+        {"datapoint": {"value": value}},
+        **({"allow_redirects": False} if target == "REAL_FEEL" else {}),
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("device_mode", True),
+        ("device_mode", "1"),
+        ("device_mode", 100),
+        ("activate_realfeel", "unknown"),
+        ("activate_realfeel", None),
+        ("firmware_version", "1.1"),
+        ("appliance_model", "other"),
+    ],
+)
+async def test_fresh_dehumidify_guard_rejects_unsafe_data(hass, cloud, field, value):
+    """A stale previously valid snapshot cannot authorize an incorrect command."""
+    await setup(hass, cloud)
+    cloud[1][field] = value
+    with pytest.raises(ServiceValidationError):
+        await set_mode(hass, "DEHUMIDIFY")
+    cloud[4].assert_not_awaited()
+
+
+async def test_pending_suppresses_old_echo_and_blocks_wrong_followup(hass, cloud):
+    await setup(hass, cloud)
+    cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    await set_mode(hass, "REAL_FEEL")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
+    with pytest.raises(ServiceValidationError, match="Wait"):
+        await set_mode(hass, "DEHUMIDIFY")
+    cloud[4].assert_awaited_once()
+
+    cloud[1]["activate_realfeel"] = REAL_FEEL_ACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "REAL_FEEL"
+    await set_mode(hass, "DEHUMIDIFY")
+    assert cloud[4].await_count == 2
+    assert cloud[4].await_args.kwargs == {"allow_redirects": False}
+
+
+@pytest.mark.parametrize("failure", ["timeout", "cancel"])
+async def test_ambiguous_activation_keeps_unknown_until_observation(
+    hass, cloud, failure
+):
+    await setup(hass, cloud)
+    cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    started = asyncio.Event()
+
+    async def send(*args, **kwargs):
+        started.set()
+        if failure == "timeout":
+            raise TimeoutError("lost response")
+        await asyncio.Event().wait()
+
+    cloud[4].side_effect = send
+    task = asyncio.create_task(set_mode(hass, "REAL_FEEL"))
+    await asyncio.wait_for(started.wait(), 3)
+    if failure == "cancel":
+        task.cancel()
+    with pytest.raises(
+        HomeAssistantError if failure == "timeout" else asyncio.CancelledError
+    ):
+        await task
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
+    with pytest.raises(ServiceValidationError):
+        await set_mode(hass, "DEHUMIDIFY")
+    cloud[4].assert_awaited_once()
+    cloud[1]["activate_realfeel"] = REAL_FEEL_ACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "REAL_FEEL"
+
+
+async def test_pending_expiry_fetches_new_data_and_external_mode_recovers(hass, cloud):
+    await setup(hass, cloud)
+    await set_mode(hass, "DRY_CLOTHES")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
+    cloud[1]["device_mode"] = 3
+    reads = cloud[3].await_count
+    entity._pending_deadline = hass.loop.time() - 1
+    entity._pending_timer.cancel()
+    entity._pending_expired(entity._pending_generation)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert cloud[3].await_count == reads + 1
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "PURIFIER"
+
+
+async def test_new_request_replaces_pending_and_old_timeout_cannot_clear_it(
+    hass, cloud
+):
+    await setup(hass, cloud)
+    await set_mode(hass, "DRY_CLOTHES")
+    entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
+    old_generation = entity._pending_generation
+    await set_mode(hass, "PURIFIER")
+    entity._pending_expired(old_generation)
+    cloud[1]["device_mode"] = 2
+    await refresh(hass, cloud)
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
+    cloud[1]["device_mode"] = 3
+    await refresh(hass, cloud)
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "PURIFIER"
+    assert cloud[4].await_count == 2
+
+
+async def test_guard_failure_and_lock_wait_cancellation_do_not_set_pending(hass, cloud):
+    await setup(hass, cloud)
+    entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
+    cloud[1]["activate_realfeel"] = "unknown"
+    with pytest.raises(ServiceValidationError):
+        await set_mode(hass, "DEHUMIDIFY")
+    assert entity._pending_mode is None
+    lock = cloud[0].runtime_data.humidifier_commands._lock
+    await lock.acquire()
+    task = asyncio.create_task(set_mode(hass, "REAL_FEEL"))
+    try:
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        lock.release()
+    assert entity._pending_mode is None
+    cloud[4].assert_not_awaited()
+
+
+async def test_unload_cancels_pending_timer(hass, cloud):
+    await setup(hass, cloud)
+    await set_mode(hass, "DRY_CLOTHES")
+    entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
+    timer = entity._pending_timer
+    assert timer is not None and not timer.cancelled()
+    assert await hass.config_entries.async_unload(cloud[0].entry_id)
+    assert timer.cancelled()
+    with patch.object(entity, "async_schedule_update_ha_state") as schedule:
+        entity._pending_expired(entity._pending_generation)
+        schedule.assert_not_called()
+
+
+async def test_read_error_does_not_send_or_expose_response(hass, cloud):
+    await setup(hass, cloud)
+    cloud[3].side_effect = TimeoutError("secret server response")
+    with pytest.raises(HomeAssistantError) as err:
+        await set_mode(hass, "DEHUMIDIFY")
+    assert "secret server response" not in str(err.value)
+    cloud[4].assert_not_awaited()
+
+
+async def test_exit_button_is_hidden_by_default_and_remains_callable(hass, cloud):
+    await setup(hass, cloud)
+    entry = er.async_get(hass).async_get(button_id(hass))
+    assert entry.hidden_by == er.RegistryEntryHider.INTEGRATION
+    await test_real_feel_buttons.press(hass)
+    cloud[4].assert_awaited_once_with(
+        "apiv1/dsns/test-dsn/properties/activate_realfeel/datapoints.json",
+        {"datapoint": {"value": REAL_FEEL_DEACTIVATION_PAYLOAD}},
+        allow_redirects=False,
+    )
+
+
+async def test_existing_button_visibility_choice_survives_update(hass, cloud):
+    registry = er.async_get(hass)
+    old = registry.async_get_or_create(
+        "button",
+        DOMAIN,
+        f"{DOMAIN}_test-dsn_request_exit_real_feel",
+        config_entry=cloud[0],
+        suggested_object_id="old_exit",
+    )
+    assert old.hidden_by is None
+    await setup(hass, cloud)
+    current = registry.async_get(button_id(hass))
+    assert current.entity_id == old.entity_id
+    assert current.hidden_by is None
+
+
+async def test_identity_loss_and_recovery_do_not_bypass_dehumidify_guard(hass, cloud):
+    await setup(hass, cloud)
+    cloud[1]["firmware_version"] = "1.1"
+    await refresh(hass, cloud)
+    state = hass.states.get(humidifier_id(hass))
+    assert state.attributes["mode"] is None
+    assert "REAL_FEEL" not in state.attributes["available_modes"]
+    with pytest.raises(ServiceValidationError, match="firmware"):
+        await set_mode(hass, "DEHUMIDIFY")
+    cloud[4].assert_not_awaited()
+    cloud[1]["firmware_version"] = "1.0"
+    await refresh(hass, cloud)
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "REAL_FEEL"
+
+
+@pytest.mark.parametrize("cloud", [{"firmware_version": "other"}], indirect=True)
+async def test_other_device_keeps_original_direct_mode_path(hass, cloud):
+    await setup(hass, cloud)
+    reads = cloud[3].await_count
+
+    async def write(_path, _data):
+        assert cloud[3].await_count == reads
+        return {}
+
+    cloud[4].side_effect = write
+    await set_mode(hass, "DEHUMIDIFY")
+    cloud[4].assert_awaited_once_with(
+        "apiv1/dsns/test-dsn/properties/device_mode/datapoints.json",
+        {"datapoint": {"value": 1}},
+    )
+
+
+async def test_old_poll_cannot_overwrite_pending_or_post_command_observation(
+    hass, cloud
+):
+    await setup(hass, cloud)
+    cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    old_snapshot = cloud[2]()
+    started, release, fresh_started, release_fresh = (asyncio.Event() for _ in range(4))
+    reads = 0
+
+    async def read(_path):
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            started.set()
+            await release.wait()
+            return old_snapshot
+        fresh_started.set()
+        await release_fresh.wait()
+        return cloud[2]()
+
+    cloud[3].side_effect = read
+    cloud[0].runtime_data.invalidate_properties()
+    old = asyncio.create_task(async_update_entity(hass, humidifier_id(hass)))
+    try:
+        await asyncio.wait_for(started.wait(), 3)
+        await set_mode(hass, "REAL_FEEL")
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
+        cloud[1]["activate_realfeel"] = REAL_FEEL_ACTIVATION_PAYLOAD
+        release.set()
+        await old
+        await asyncio.wait_for(fresh_started.wait(), 3)
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
+        release_fresh.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "REAL_FEEL"
+        cloud[4].assert_awaited_once()
+    finally:
+        release.set()
+        release_fresh.set()
+        await asyncio.gather(old, return_exceptions=True)
+
+
+async def test_observation_during_write_does_not_clear_pending(hass, cloud):
+    await setup(hass, cloud)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def write(*args, **kwargs):
+        cloud[1]["device_mode"] = 2
+        started.set()
+        await release.wait()
+        return {}
+
+    cloud[4].side_effect = write
+    task = asyncio.create_task(set_mode(hass, "DRY_CLOTHES"))
+    try:
+        await asyncio.wait_for(started.wait(), 3)
+        await refresh(hass, cloud)
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
+        release.set()
+        await task
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "DRY_CLOTHES"
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_exit_write_failure_keeps_pending_and_hides_transport_details(
+    hass, cloud
+):
+    await setup(hass, cloud)
+    cloud[4].side_effect = TimeoutError("secret response")
+    with pytest.raises(HomeAssistantError) as err:
+        await set_mode(hass, "DEHUMIDIFY")
+    assert "secret response" not in str(err.value)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
+    cloud[4].assert_awaited_once()
+
+
+async def test_external_third_mode_clears_pending_during_guard(hass, cloud):
+    """A distinct ordinary cloud mode can supersede an unconfirmed request."""
+    await setup(hass, cloud)
+    await set_mode(hass, "DRY_CLOTHES")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
+    cloud[1]["device_mode"] = 3
+    await set_mode(hass, "DEHUMIDIFY")
+    assert cloud[4].await_count == 2
+    cloud[4].assert_awaited_with(
+        "apiv1/dsns/test-dsn/properties/device_mode/datapoints.json",
+        {"datapoint": {"value": 1}},
+    )
+
+
+async def test_external_third_mode_clears_pending_during_poll(hass, cloud):
+    await setup(hass, cloud)
+    await set_mode(hass, "DRY_CLOTHES")
+    cloud[1]["device_mode"] = 3
+    await refresh(hass, cloud)
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "PURIFIER"
+
+
+@pytest.mark.parametrize("cloud", [{"firmware_version": "other"}], indirect=True)
+async def test_device_discovered_while_command_waits_uses_guarded_path(hass, cloud):
+    await setup(hass, cloud)
+    lock = cloud[0].runtime_data.humidifier_commands._lock
+    await lock.acquire()
+    task = asyncio.create_task(set_mode(hass, "DEHUMIDIFY"))
+    try:
+        await asyncio.sleep(0)
+        cloud[1]["firmware_version"] = "1.0"
+        await refresh(hass, cloud)
+        cloud[4].assert_not_awaited()
+    finally:
+        lock.release()
+    await task
+    cloud[4].assert_awaited_once_with(
+        "apiv1/dsns/test-dsn/properties/activate_realfeel/datapoints.json",
+        {"datapoint": {"value": REAL_FEEL_DEACTIVATION_PAYLOAD}},
+        allow_redirects=False,
+    )
+
+
+async def test_preflight_spanning_pending_expiry_cannot_route_stale_read(hass, cloud):
+    await setup(hass, cloud)
+    cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    await set_mode(hass, "REAL_FEEL")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
+    entity._pending_deadline = hass.loop.time() + 0.05
+    old = cloud[2]()
+    started, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def read(_path):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            started.set()
+            await release.wait()
+            return old
+        return cloud[2]()
+
+    cloud[3].side_effect = read
+    task = asyncio.create_task(set_mode(hass, "DEHUMIDIFY"))
+    try:
+        await asyncio.wait_for(started.wait(), 3)
+        await asyncio.sleep(0.06)
+        cloud[1]["activate_realfeel"] = REAL_FEEL_ACTIVATION_PAYLOAD
+        entity._pending_timer.cancel()
+        entity._pending_expired(entity._pending_generation)
+        release.set()
+        with pytest.raises(ServiceValidationError, match="Wait"):
+            await task
+        await hass.async_block_till_done(wait_background_tasks=True)
+        cloud[4].assert_awaited_once()
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "REAL_FEEL"
+        await set_mode(hass, "DEHUMIDIFY")
+        assert cloud[4].await_count == 2
+        assert cloud[4].await_args.kwargs == {"allow_redirects": False}
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("status", [307, 308])
+async def test_supported_activation_redirect_is_not_followed(status):
+    client, session, response = make_client(status, {"error": "secret response"})
+    with pytest.raises(HomeAssistantError):
+        await client.request_enter_real_feel()
+    assert len(session.calls) == 1
+    assert session.calls[0][2]["allow_redirects"] is False
+    assert session.calls[0][2]["json"] == {
+        "datapoint": {"value": REAL_FEEL_ACTIVATION_PAYLOAD}
+    }
+    assert response.json_calls == 0
