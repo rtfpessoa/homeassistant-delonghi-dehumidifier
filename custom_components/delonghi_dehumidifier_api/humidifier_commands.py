@@ -3,15 +3,20 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
+from .action_refresh import ActionRefresh
+
 
 class HumidifierCommands:
     """Serialize commands and notify listeners when observations need refresh."""
 
-    def __init__(self, invalidate_properties: Callable[[], None]) -> None:
+    def __init__(
+        self, invalidate_properties: Callable[[], None], action_refresh: ActionRefresh
+    ) -> None:
         """Initialize the command state for one integration entry."""
         self._lock = asyncio.Lock()
         self._generation = 0
         self._invalidate_properties = invalidate_properties
+        self._action_refresh = action_refresh
         self._refresh_listeners: set[Callable[[], None]] = set()
 
     @property
@@ -40,12 +45,14 @@ class HumidifierCommands:
             if guard is not None:
                 await guard()
             accepted = False
+            self._action_refresh.write_started()
             try:
                 await send()
                 accepted = True
             finally:
                 self._generation += 1
                 self._invalidate_properties()
+                self._action_refresh.write_finished()
                 if not accepted or refresh_after_success:
                     for listener in tuple(self._refresh_listeners):
                         listener()

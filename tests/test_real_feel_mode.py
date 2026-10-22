@@ -8,7 +8,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_component import async_update_entity
 
-from custom_components.delonghi_dehumidifier_api import humidifier
+from custom_components.delonghi_dehumidifier_api import action_refresh, humidifier
 from custom_components.delonghi_dehumidifier_api.client import InvalidCredentialsError
 from custom_components.delonghi_dehumidifier_api.const import (
     DOMAIN,
@@ -261,16 +261,25 @@ async def test_pending_real_feel_refresh_stops_when_confirmed(hass, cloud):
     await setup(hass, cloud)
     cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
     await refresh(hass, cloud)
-    with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05):
+    with (
+        patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 3600),
+        patch.object(action_refresh, "_REFRESH_DELAY", 3600),
+    ):
         await set_mode(hass, "REAL_FEEL")
         await hass.async_block_till_done(wait_background_tasks=True)
+        entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
+        pending = entity._pending_refresh_timer
+        generation = entity._pending_generation
+        assert pending is not None
         cloud[1]["activate_realfeel"] = REAL_FEEL_ACTIVATION_PAYLOAD
         await refresh(hass, cloud)
         assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "REAL_FEEL"
+        assert pending.cancelled()
         reads = cloud[3].await_count
         cloud[0].runtime_data.device_properties_timestamp -= 11
-        await asyncio.sleep(0.15)
+        entity._pending_refresh_tick(generation)
         await hass.async_block_till_done(wait_background_tasks=True)
+        assert entity._pending_refresh_timer is None
         assert cloud[3].await_count == reads
     cloud[4].assert_awaited_once()
 
@@ -278,16 +287,25 @@ async def test_pending_real_feel_refresh_stops_when_confirmed(hass, cloud):
 @pytest.mark.parametrize("cloud", [{"device_mode": 2}], indirect=True)
 async def test_pending_refresh_stops_when_distinct_external_mode_arrives(hass, cloud):
     await setup(hass, cloud)
-    with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05):
+    with (
+        patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 3600),
+        patch.object(action_refresh, "_REFRESH_DELAY", 3600),
+    ):
         await set_mode(hass, "REAL_FEEL")
         await hass.async_block_till_done(wait_background_tasks=True)
+        entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
+        pending = entity._pending_refresh_timer
+        generation = entity._pending_generation
+        assert pending is not None
         cloud[1]["device_mode"] = 3
         await refresh(hass, cloud)
         assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "PURIFIER"
+        assert pending.cancelled()
         reads = cloud[3].await_count
         cloud[0].runtime_data.device_properties_timestamp -= 11
-        await asyncio.sleep(0.15)
+        entity._pending_refresh_tick(generation)
         await hass.async_block_till_done(wait_background_tasks=True)
+        assert entity._pending_refresh_timer is None
         assert cloud[3].await_count == reads
     cloud[4].assert_awaited_once()
 
@@ -298,7 +316,8 @@ async def test_pending_refresh_is_bounded_and_reuses_cache(hass, cloud):
     await refresh(hass, cloud)
     client = cloud[0].runtime_data
     with (
-        patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.03),
+        patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 3600),
+        patch.object(action_refresh, "_REFRESH_DELAY", 3600),
         patch.object(
             client, "get_properties", wraps=client.get_properties
         ) as properties,
@@ -307,12 +326,16 @@ async def test_pending_refresh_is_bounded_and_reuses_cache(hass, cloud):
         await hass.async_block_till_done(wait_background_tasks=True)
         reads = cloud[3].await_count
         observations = properties.await_count
-        await asyncio.sleep(0.2)
-        await hass.async_block_till_done(wait_background_tasks=True)
+        entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
+        for _ in range(4):
+            timer = entity._pending_refresh_timer
+            assert timer is not None
+            timer.cancel()
+            entity._pending_refresh_tick(entity._pending_generation)
+            await hass.async_block_till_done(wait_background_tasks=True)
         assert properties.await_count - observations == 4
         assert cloud[3].await_count == reads  # The ten-second cache remains valid.
         assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
-        entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
         assert entity._pending_refresh_timer is None
     cloud[4].assert_awaited_once()
 
@@ -457,6 +480,7 @@ async def test_other_mode_or_device_does_not_schedule_extra_refreshes(
     client = cloud[0].runtime_data
     with (
         patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05),
+        patch.object(action_refresh, "_REFRESH_DELAY", 3600),
         patch.object(
             client, "get_properties", wraps=client.get_properties
         ) as properties,
@@ -506,7 +530,10 @@ async def test_superseded_inflight_refresh_cannot_restore_old_mode(hass, cloud):
     await refresh(hass, cloud)
     started, release = asyncio.Event(), asyncio.Event()
 
-    with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05):
+    with (
+        patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05),
+        patch.object(action_refresh, "_REFRESH_DELAY", 3600),
+    ):
         await set_mode(hass, "REAL_FEEL")
         await hass.async_block_till_done(wait_background_tasks=True)
         old_snapshot = cloud[2]()

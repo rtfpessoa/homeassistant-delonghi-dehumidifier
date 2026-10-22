@@ -239,7 +239,7 @@ class GenericSensor(AuthAvailabilityEntity, SensorEntity):
         await super().async_added_to_hass()
         await self.async_update()
 
-    async def async_update(self):
+    async def _async_update(self, *, after_action: bool):
         """Update the sensor's state.
 
         This method fetches the current humidity from the client and updates the

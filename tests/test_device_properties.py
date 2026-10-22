@@ -159,7 +159,7 @@ async def test_unknown_enum_values_remain_unknown(hass, device_with_missing_prop
 async def test_switch_command_is_not_overwritten_by_stale_cache(
     hass, device_with_missing_properties
 ):
-    """Existing switch behavior keeps the commanded state until proper polling exists."""
+    """The accepted state is retained immediately, then a missing value is unknown."""
     _, _, get_request, set_eco = device_with_missing_properties
     eco = entity_id(hass, "switch", "eco_mode_switch")
     await hass.services.async_call(
@@ -169,6 +169,6 @@ async def test_switch_command_is_not_overwritten_by_stale_cache(
     assert hass.states.get(eco).state == "on"
     assert get_request.await_count == 1
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=2))
-    await hass.async_block_till_done()
-    assert get_request.await_count == 1
-    assert hass.states.get(eco).state == "on"
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert get_request.await_count == 2
+    assert hass.states.get(eco).state == STATE_UNKNOWN
