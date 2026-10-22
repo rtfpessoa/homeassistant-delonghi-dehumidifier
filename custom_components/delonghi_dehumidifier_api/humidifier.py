@@ -126,11 +126,17 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         self._refresh_handle = self.hass.loop.call_soon(refresh)
 
     async def _command(self, send: Callable[[], Awaitable[dict]]) -> None:
-        """Serialize writes and request an observation only after acceptance."""
+        """Serialize writes and invalidate stale observations after an attempt."""
         async with self._command_lock:
-            await send()
-            self._command_generation += 1
-            self.client.invalidate_properties()
+            accepted = False
+            try:
+                await send()
+                accepted = True
+            finally:
+                self._command_generation += 1
+                self.client.invalidate_properties()
+                if not accepted:
+                    self._schedule_refresh()
 
     async def async_update(self) -> None:
         """Handle the event when the device status changes."""
