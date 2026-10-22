@@ -44,7 +44,7 @@ async def async_setup_entry(
                 device_info,
                 client,
                 "Eco Mode",
-                await client.get_eco(),
+                None,
                 client.set_eco,
                 client.get_eco,
             ),
@@ -53,11 +53,12 @@ async def async_setup_entry(
                 device_info,
                 client,
                 "Swing Mode",
-                await client.get_swing(),
+                None,
                 client.set_swing,
                 client.get_swing,
             ),
-        ]
+        ],
+        True,
     )
 
 

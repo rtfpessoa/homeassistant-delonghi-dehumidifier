@@ -336,6 +336,26 @@ class InvalidCredentialsError(HomeAssistantError):
     """The provider rejected the account credentials."""
 
 
+class InvalidNumericStateError(HomeAssistantError):
+    """A cloud property cannot be interpreted as an integer state."""
+
+
+def parse_integer_state(value: object) -> int | None:
+    """Parse supported cloud integer values without exposing invalid data."""
+    if value is None:
+        return None
+    if type(value) is int:
+        return value
+    if type(value) is float and value.is_integer():
+        return int(value)
+    if type(value) is str:
+        try:
+            return int(value)
+        except ValueError:
+            pass
+    raise InvalidNumericStateError("Invalid numeric cloud state") from None
+
+
 def _login_token_from_response(response: str) -> str:
     """Read the login token or identify a documented credentials error."""
     data = json.loads(response)
@@ -1134,8 +1154,7 @@ class APIClient:
           The value of the specified property.
 
         """
-        value = await self.get_property(name)
-        return None if value is None else int(value)
+        return parse_integer_state(await self.get_property(name))
 
     async def get_properties(self) -> dict:
         """Retrieve the properties of the device.

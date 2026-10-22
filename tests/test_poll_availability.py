@@ -107,6 +107,81 @@ async def test_partial_bad_snapshot_does_not_mutate_humidifier(hass, device, cap
     assert state.attributes["current_humidity"] == 43
 
 
+@pytest.mark.parametrize(
+    ("field", "bad", "domain", "suffix"),
+    [
+        ("device_status", True, "sensor", "device_status_sensor"),
+        ("device_mode", 1.5, "sensor", "device_mode_sensor"),
+        (
+            "current_humidity",
+            "secret-invalid-number",
+            "sensor",
+            "current_humidity_sensor",
+        ),
+        ("humidity_setpoint", False, "sensor", "target_humidity_sensor"),
+        ("set_eco", True, "switch", "eco_mode_switch"),
+        ("swing", 0.5, "switch", "swing_mode_switch"),
+    ],
+)
+async def test_invalid_numeric_state_is_unavailable_and_recovers(
+    hass, device, caplog, field, bad, domain, suffix
+):
+    """No boolean, fractional or malformed cloud value becomes a known state."""
+    entry, properties, _, _, _, _, _, _ = device
+    target = entity_id(hass, domain, suffix)
+    humidifier = entity_id(hass, "humidifier", "dehumidifier")
+    entity = hass.data["humidifier"].get_entity(humidifier)
+    before = (
+        entity.mode,
+        entity.target_humidity,
+        entity.current_humidity,
+        entity.is_on,
+    )
+    properties[field] = bad
+    with caplog.at_level(logging.DEBUG):
+        await update(hass, entry, target, humidifier)
+    assert hass.states.get(target).state == STATE_UNAVAILABLE
+    if field in (
+        "device_status",
+        "device_mode",
+        "current_humidity",
+        "humidity_setpoint",
+    ):
+        assert hass.states.get(humidifier).state == STATE_UNAVAILABLE
+        assert (
+            entity.mode,
+            entity.target_humidity,
+            entity.current_humidity,
+            entity.is_on,
+        ) == before
+    assert "secret-invalid-number" not in caplog.text
+
+    properties.update(
+        device_status=2,
+        device_mode=2,
+        current_humidity=43,
+        humidity_setpoint=45,
+        set_eco=1,
+        swing=1,
+    )
+    await update(hass, entry, target, humidifier)
+    expected = {
+        "device_status": "OFF",
+        "device_mode": "DRY_CLOTHES",
+        "current_humidity": "43",
+        "humidity_setpoint": "45",
+        "set_eco": "on",
+        "swing": "on",
+    }
+    assert hass.states.get(target).state == expected[field]
+    state = hass.states.get(humidifier)
+    assert state.state == "off"
+    assert (state.attributes["mode"], state.attributes["humidity"]) == (
+        "DRY_CLOTHES",
+        45,
+    )
+
+
 @pytest.mark.parametrize("domain", ["sensor", "humidifier"])
 async def test_cancellation_preserves_published_state(hass, device, domain):
     entry, _, snapshot, get, _, _, _, _ = device

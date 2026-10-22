@@ -23,6 +23,7 @@ from .client import (
     InvalidCredentialsError,
     Mode,
     Status,
+    parse_integer_state,
 )
 from .const import DOMAIN, REAL_FEEL_ACTIVATION_PAYLOAD, REAL_FEEL_DEACTIVATION_PAYLOAD
 from .entity import AuthAvailabilityEntity
@@ -64,7 +65,7 @@ def _int_property(properties: list[dict], name: str) -> int | None:
     value = next(
         (prop.get("value") for prop in properties if prop.get("name") == name), None
     )
-    return None if value is None else int(value)
+    return parse_integer_state(value)
 
 
 def _snapshot_values(
@@ -72,6 +73,11 @@ def _snapshot_values(
 ) -> tuple[str | None, int | None, int | None, bool | None]:
     """Interpret every humidifier attribute from the same complete snapshot."""
     if tested_device:
+        # Keep the tested device's stricter mode interpretation, but never let an
+        # invalid present value produce an otherwise plausible partial snapshot.
+        for prop in properties:
+            if prop.get("name") == "device_mode":
+                parse_integer_state(prop.get("value"))
         mode = _tested_device_mode(properties)
     else:
         legacy_mode = MODE_BY_VALUE.get(_int_property(properties, "device_mode"))
