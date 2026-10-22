@@ -104,6 +104,28 @@
       "swing_mode": {
         "name": "Swing Mode"
       }
+    },
+    "button": {
+      "request_exit_real_feel": {
+        "name": "Request exit from Real Feel"
+      }
+    }
+  },
+  "exceptions": {
+    "device_removed": {
+      "message": "The device is no longer available. Reload the integration and try again."
+    },
+    "real_feel_unsupported": {
+      "message": "This request requires a DDSX220 with firmware 1.0. Check the device information and reload the integration."
+    },
+    "real_feel_not_ready": {
+      "message": "The cloud data is not ready for this request. Select Real Feel in the De'Longhi app, wait for it to sync, and try again."
+    },
+    "real_feel_read_failed": {
+      "message": "Unable to check the current device data. Check the connection and try again."
+    },
+    "real_feel_write_failed": {
+      "message": "The Real Feel exit request failed; the device may have received it. Check the De'Longhi app before trying again."
     }
   }
 }

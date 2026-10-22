@@ -8,9 +8,8 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from . import DeLonghiDehumidifierConfigEntry
-from .const import REAL_FEEL_ACTIVATION_PAYLOAD
+from .const import REAL_FEEL_ACTIVATION_PAYLOAD, REAL_FEEL_DEACTIVATION_PAYLOAD
 
-_CANDIDATE_DEACTIVATION_PAYLOAD = "AAIDChIXHEY8Mig="
 _PROPERTY_NAMES = (
     "alarm_state",
     "set_eco",
@@ -88,7 +87,7 @@ def _export_property(name: str, item: dict[str, Any]) -> dict[str, Any]:
             value, REAL_FEEL_ACTIVATION_PAYLOAD
         )
         result["matches_candidate_deactivation_command"] = _matches_command(
-            value, _CANDIDATE_DEACTIVATION_PAYLOAD
+            value, REAL_FEEL_DEACTIVATION_PAYLOAD
         )
     return result
 

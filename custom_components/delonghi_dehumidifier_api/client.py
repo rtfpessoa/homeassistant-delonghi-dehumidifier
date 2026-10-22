@@ -15,7 +15,7 @@ from uuid import uuid4
 import aiohttp
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import REAL_FEEL_ACTIVATION_PAYLOAD
+from .const import REAL_FEEL_ACTIVATION_PAYLOAD, REAL_FEEL_DEACTIVATION_PAYLOAD
 from .humidifier_commands import HumidifierCommands
 
 # API Docs: https://docs.aylanetworks.com/reference
@@ -596,6 +596,15 @@ class APIClient:
             {"datapoint": {"value": mode.value}},
         )
 
+    async def request_exit_real_feel(self) -> dict:
+        """Send the tested Real Feel exit request without following redirects."""
+        device_dsn = await self.get_first_device()
+        return await self.post_request(
+            f"apiv1/dsns/{device_dsn}/properties/activate_realfeel/datapoints.json",
+            {"datapoint": {"value": REAL_FEEL_DEACTIVATION_PAYLOAD}},
+            allow_redirects=False,
+        )
+
     async def set_swing(self, status: OffOnStatus) -> dict:
         """Set the swing operation mode.
 
@@ -1011,7 +1020,9 @@ class APIClient:
         async with self.session.get(url, headers=headers) as response:
             return await self._read_response(response)
 
-    async def post_request(self, path: str, body: dict) -> dict:
+    async def post_request(
+        self, path: str, body: dict, *, allow_redirects: bool | None = None
+    ) -> dict:
         """Send a POST request to the specified path with the given body.
 
         Args:
@@ -1030,7 +1041,12 @@ class APIClient:
             "Authorization": f"auth_token {access_token}",
             "Content-Type": "application/json",
         }
-        async with self.session.post(url, headers=headers, json=body) as response:
+        options = (
+            {} if allow_redirects is None else {"allow_redirects": allow_redirects}
+        )
+        async with self.session.post(
+            url, headers=headers, json=body, **options
+        ) as response:
             return await self._read_response(response)
 
     async def get_first_device(self) -> str:
