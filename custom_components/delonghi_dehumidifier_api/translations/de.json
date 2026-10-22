@@ -104,11 +104,6 @@
       "swing_mode": {
         "name": "Schwenkmodus"
       }
-    },
-    "button": {
-      "request_exit_real_feel": {
-        "name": "Beenden von Real Feel anfordern"
-      }
     }
   },
   "exceptions": {
@@ -117,9 +112,6 @@
     },
     "real_feel_unsupported": {
       "message": "Diese Anfrage erfordert ein DDSX220 mit Firmware 1.0. Prüfe die Geräteinformationen und lade die Integration neu."
-    },
-    "real_feel_not_ready": {
-      "message": "Die Cloud-Daten sind für diese Anfrage noch nicht bereit. Wähle Real Feel in der De'Longhi-App, warte auf die Synchronisierung und versuche es erneut."
     },
     "real_feel_mode_not_ready": {
       "message": "Der Gerätemodus ist noch nicht bereit. Warte auf die Synchronisierung der De'Longhi-App und versuche es erneut."

@@ -1,7 +1,7 @@
 """Exercise the best-effort Real Feel mode through Home Assistant."""
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -15,12 +15,11 @@ from custom_components.delonghi_dehumidifier_api.const import (
     REAL_FEEL_ACTIVATION_PAYLOAD,
     REAL_FEEL_DEACTIVATION_PAYLOAD,
 )
-from tests import test_real_feel_buttons
+from tests import real_feel_helpers
 from tests.test_client_http import make_client
 
-cloud = test_real_feel_buttons.cloud
-setup = test_real_feel_buttons.setup
-button_id = test_real_feel_buttons.button_id
+cloud = real_feel_helpers.cloud
+setup = real_feel_helpers.setup
 
 
 def humidifier_id(hass):
@@ -651,32 +650,110 @@ async def test_read_error_does_not_send_or_expose_response(hass, cloud):
     cloud[4].assert_not_awaited()
 
 
-async def test_exit_button_is_hidden_by_default_and_remains_callable(hass, cloud):
+async def test_preexisting_read_cannot_choose_stale_dehumidify_route(hass, cloud):
+    """Drain an older GET before deciding which Dehumidify command to send."""
     await setup(hass, cloud)
-    entry = er.async_get(hass).async_get(button_id(hass))
-    assert entry.hidden_by == er.RegistryEntryHider.INTEGRATION
-    await test_real_feel_buttons.press(hass)
-    cloud[4].assert_awaited_once_with(
-        "apiv1/dsns/test-dsn/properties/activate_realfeel/datapoints.json",
-        {"datapoint": {"value": REAL_FEEL_DEACTIVATION_PAYLOAD}},
-        allow_redirects=False,
-    )
+    entry, values, snapshot, get, post = cloud
+    client = entry.runtime_data
+    old = snapshot()
+    values["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    started, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def read(_path):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            started.set()
+            await release.wait()
+            return old
+        return snapshot()
+
+    get.side_effect = read
+    client.invalidate_properties()
+    poll = asyncio.create_task(client.get_properties())
+    action = None
+    try:
+        await asyncio.wait_for(started.wait(), 3)
+        action = asyncio.create_task(set_mode(hass, "DEHUMIDIFY"))
+        await asyncio.sleep(0.02)
+        assert not action.done()
+        post.assert_not_awaited()
+        release.set()
+        await poll
+        await action
+        post.assert_awaited_once_with(
+            "apiv1/dsns/test-dsn/properties/device_mode/datapoints.json",
+            {"datapoint": {"value": 1}},
+        )
+        assert calls >= 2
+    finally:
+        release.set()
+        await asyncio.gather(
+            *(task for task in (poll, action) if task is not None),
+            return_exceptions=True,
+        )
 
 
-async def test_existing_button_visibility_choice_survives_update(hass, cloud):
-    registry = er.async_get(hass)
-    old = registry.async_get_or_create(
-        "button",
-        DOMAIN,
-        f"{DOMAIN}_test-dsn_request_exit_real_feel",
-        config_entry=cloud[0],
-        suggested_object_id="old_exit",
-    )
-    assert old.hidden_by is None
+async def test_reauth_during_exit_preflight_cannot_write(hass, cloud):
+    """A rejected token refresh aborts a pending Dehumidify request."""
     await setup(hass, cloud)
-    current = registry.async_get(button_id(hass))
-    assert current.entity_id == old.entity_id
-    assert current.hidden_by is None
+    entry, _, _, get, post = cloud
+    client = entry.runtime_data
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def read(_path):
+        started.set()
+        await release.wait()
+        await client.get_access_token()
+        raise AssertionError("authentication should fail")
+
+    get.side_effect = read
+    with patch.object(
+        client,
+        "get_new_access_token",
+        AsyncMock(side_effect=InvalidCredentialsError("credentials rejected")),
+    ) as authenticate:
+        task = asyncio.create_task(set_mode(hass, "DEHUMIDIFY"))
+        try:
+            await asyncio.wait_for(started.wait(), 3)
+            post.assert_not_awaited()
+            release.set()
+            with pytest.raises(InvalidCredentialsError):
+                await task
+            await hass.async_block_till_done()
+            authenticate.assert_awaited_once()
+            assert client.invalid_credentials
+            assert client.humidifier_commands.generation == 0
+            assert len(hass.config_entries.flow.async_progress_by_handler(DOMAIN)) == 1
+            post.assert_not_awaited()
+        finally:
+            release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_unload_during_exit_preflight_cannot_write(hass, cloud):
+    """Unloading during the fresh GET cancels the Dehumidify request."""
+    await setup(hass, cloud)
+    entry, _, _, get, post = cloud
+    started = asyncio.Event()
+
+    async def read(_path):
+        started.set()
+        await asyncio.Event().wait()
+
+    get.side_effect = read
+    task = asyncio.create_task(set_mode(hass, "DEHUMIDIFY"))
+    try:
+        await asyncio.wait_for(started.wait(), 3)
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        post.assert_not_awaited()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 async def test_identity_loss_and_recovery_do_not_bypass_dehumidify_guard(hass, cloud):

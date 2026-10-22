@@ -21,9 +21,9 @@ from custom_components.delonghi_dehumidifier_api.const import (
     REAL_FEEL_ACTIVATION_PAYLOAD,
     REAL_FEEL_DEACTIVATION_PAYLOAD,
 )
-from tests import test_real_feel_buttons, test_real_feel_mode
+from tests import real_feel_helpers, test_real_feel_mode
 
-cloud = test_real_feel_buttons.cloud
+cloud = real_feel_helpers.cloud
 
 
 @pytest.fixture(autouse=True)
@@ -59,7 +59,7 @@ async def test_entity_linked_control_appears_in_device_activity(
 ):
     """Verify the real device-page query recognizes an entity-linked event."""
     assert await async_setup_component(hass, "logbook", {})
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     entity_id = test_real_feel_mode.humidifier_id(hass)
     async_log_entry(hass, "Test", "Control event", entity_id=entity_id)
     entries = await activity_entries(hass, recorder_mock, entity_id)
@@ -72,7 +72,7 @@ async def test_confirmed_mode_change_appears_in_device_activity(
     """A successful selection that is observed in the cloud is visible in Activity."""
     assert await async_setup_component(hass, "logbook", {})
     cloud[1].update(device_mode=2, activate_realfeel=REAL_FEEL_DEACTIVATION_PAYLOAD)
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     entity_id = test_real_feel_mode.humidifier_id(hass)
     assert hass.states.get(entity_id).attributes["mode"] == "DRY_CLOTHES"
 
@@ -114,7 +114,7 @@ async def test_external_change_is_reported_once(
     cloud[1].update(device_mode=source)
     events = []
     hass.bus.async_listen(EVENT_LOGBOOK_ENTRY, lambda event: events.append(event.data))
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     assert "logbook" not in hass.config.components
     cloud[1].update(device_mode=1, activate_realfeel=REAL_FEEL_ACTIVATION_PAYLOAD)
     await test_real_feel_mode.refresh(hass, cloud)
@@ -147,7 +147,7 @@ async def test_real_feel_exit_is_reported(
     hass.config.language = language
     events = []
     hass.bus.async_listen(EVENT_LOGBOOK_ENTRY, lambda event: events.append(event.data))
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     cloud[1].update(cloud_update)
     await test_real_feel_mode.refresh(hass, cloud)
     await hass.async_block_till_done()
@@ -159,7 +159,7 @@ async def test_unknown_pending_and_same_mode_do_not_create_events(hass, cloud):
     cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
     events = []
     hass.bus.async_listen(EVENT_LOGBOOK_ENTRY, lambda event: events.append(event.data))
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     await test_real_feel_mode.set_mode(hass, "REAL_FEEL")
     await hass.async_block_till_done()
     assert (
@@ -181,7 +181,7 @@ async def test_ambiguous_failed_command_does_not_log_an_attempt(hass, cloud):
     cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
     events = []
     hass.bus.async_listen(EVENT_LOGBOOK_ENTRY, lambda event: events.append(event.data))
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     cloud[4].side_effect = TimeoutError("lost response")
     with pytest.raises(HomeAssistantError):
         await test_real_feel_mode.set_mode(hass, "REAL_FEEL")
@@ -198,7 +198,7 @@ async def test_ordinary_mode_changes_do_not_add_duplicate_activity(hass, cloud):
     cloud[1]["device_mode"] = 2
     events = []
     hass.bus.async_listen(EVENT_LOGBOOK_ENTRY, lambda event: events.append(event.data))
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     cloud[1]["device_mode"] = 3
     await test_real_feel_mode.refresh(hass, cloud)
     await hass.async_block_till_done()
@@ -217,7 +217,7 @@ async def test_scheduled_followup_reports_the_observed_mode(hass, cloud):
         reported.set()
 
     hass.bus.async_listen(EVENT_LOGBOOK_ENTRY, on_entry)
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05):
         await test_real_feel_mode.set_mode(hass, "REAL_FEEL")
         assert events == []
@@ -231,7 +231,7 @@ async def test_unavailable_recovery_keeps_the_previous_baseline(hass, cloud):
     """A transient fetch failure and recovery at the same mode do not log."""
     events = []
     hass.bus.async_listen(EVENT_LOGBOOK_ENTRY, lambda event: events.append(event.data))
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     cloud[3].side_effect = TimeoutError("test")
     await test_real_feel_mode.refresh(hass, cloud)
     assert (
@@ -252,7 +252,7 @@ async def test_unadvertised_real_feel_does_not_log(hass, cloud):
     """A legacy raw 100 on an unsupported model is not a verified mode."""
     events = []
     hass.bus.async_listen(EVENT_LOGBOOK_ENTRY, lambda event: events.append(event.data))
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     cloud[1]["device_mode"] = 100
     await test_real_feel_mode.refresh(hass, cloud)
     cloud[1]["device_mode"] = 2
@@ -265,10 +265,10 @@ async def test_reload_establishes_a_new_baseline(hass, cloud):
     """The first observation after unload/reload is not a new mode change."""
     events = []
     hass.bus.async_listen(EVENT_LOGBOOK_ENTRY, lambda event: events.append(event.data))
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     assert await hass.config_entries.async_unload(cloud[0].entry_id)
     cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     await hass.async_block_till_done()
     assert events == []
     cloud[1]["activate_realfeel"] = REAL_FEEL_ACTIVATION_PAYLOAD
@@ -282,7 +282,7 @@ async def test_older_poll_cannot_create_an_activity_event(hass, cloud):
     cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
     events = []
     hass.bus.async_listen(EVENT_LOGBOOK_ENTRY, lambda event: events.append(event.data))
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     entity = hass.data["humidifier"].get_entity(test_real_feel_mode.humidifier_id(hass))
     cloud[1]["activate_realfeel"] = REAL_FEEL_ACTIVATION_PAYLOAD
     old = [item["property"] for item in cloud[2]()]
@@ -313,7 +313,7 @@ async def test_unload_suppresses_a_late_poll_event(hass, cloud):
     cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
     events = []
     hass.bus.async_listen(EVENT_LOGBOOK_ENTRY, lambda event: events.append(event.data))
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     entity = hass.data["humidifier"].get_entity(test_real_feel_mode.humidifier_id(hass))
     cloud[1]["activate_realfeel"] = REAL_FEEL_ACTIVATION_PAYLOAD
     snapshot = [item["property"] for item in cloud[2]()]
@@ -340,7 +340,7 @@ async def test_device_page_live_logbook_stream(
     """The actual filtered device Activity websocket receives a live event."""
     assert await async_setup_component(hass, "logbook", {})
     cloud[1]["device_mode"] = 2
-    await test_real_feel_buttons.setup(hass, cloud)
+    await real_feel_helpers.setup(hass, cloud)
     registry = er.async_get(hass)
     entity_id = test_real_feel_mode.humidifier_id(hass)
     device_id = registry.async_get(entity_id).device_id

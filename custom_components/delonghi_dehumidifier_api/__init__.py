@@ -8,13 +8,13 @@ from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD, Platfo
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
+from homeassistant.helpers import entity_registry as er
 
 from .client import APIClient, InvalidCredentialsError
-from .const import RUNTIME_REAUTH_ID
+from .const import DOMAIN, RUNTIME_REAUTH_ID
 
 _PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
-    Platform.BUTTON,
     Platform.HUMIDIFIER,
     Platform.SENSOR,
     Platform.SWITCH,
@@ -58,9 +58,23 @@ async def async_setup_entry(
         await hass.config_entries.async_unload_platforms(entry, _PLATFORMS)
         await client.async_shutdown()
         raise ConfigEntryAuthFailed
+    _remove_retired_buttons(hass, entry)
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
 
     return True
+
+
+def _remove_retired_buttons(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove old Real Feel buttons, including disabled or renamed entries."""
+    registry = er.async_get(hass)
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if (
+            entity.domain == Platform.BUTTON
+            and entity.platform == DOMAIN
+            and entity.unique_id.startswith(f"{DOMAIN}_")
+            and entity.unique_id.endswith("_request_exit_real_feel")
+        ):
+            registry.async_remove(entity.entity_id)
 
 
 async def _async_update_options(
