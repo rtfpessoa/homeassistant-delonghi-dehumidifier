@@ -82,7 +82,6 @@ This custom component creates following entities for the dehumidifier:
 | `sensor`     | Sensors for filter change alarm.                                                                                                 |
 | `sensor`     | Sensors for filter life.                                                                                                         |
 | `binary_sensor` | Device alarm using observed alarm values.                                                                                      |
-| `button`     | Request exit from Real Feel on the tested DDSX220 with firmware 1.0.                                                              |
 | `switch`     | Switch to enable eco mode.                                                                                                       |
 | `switch`     | Switch to enable fan swing.                                                                                                      |
 
@@ -109,23 +108,19 @@ After two minutes the integration requests another cloud update; a slow or faile
 read can leave the mode unknown or unavailable longer. A Dehumidify request may
 be rejected during the wait. A different ordinary mode reported by the cloud can
 end the wait early; this too is only an estimate. Cloud data can remain stale even
-after the wait. Changes from the app and the existing exit button do not start this
-waiting period.
+after the wait. Changes from the app do not start this waiting period.
 
-The **Request exit from Real Feel** configuration button remains available for
-existing automations; it is hidden by default for new installations. Its
-last-pressed timestamp records an attempt, including a rejected or failed
-request, and does not confirm acceptance or effect. Target it explicitly:
-Home Assistant excludes configuration buttons when a device or area is targeted,
-but targeting all buttons or labels assigned directly to it can still invoke it.
-Other models and firmware versions do not receive this button or advertise Real
-Feel in the selector. The existing direct `REAL_FEEL` action remains available;
+The **Request exit from Real Feel** button has been removed. Update automations
+that pressed it to call `humidifier.set_mode` with `DEHUMIDIFY` on the humidifier;
+the selector applies its own validation and may reject a request while waiting
+for cloud data. Other models and firmware versions do not advertise Real Feel in
+the selector. The existing direct `REAL_FEEL` action remains available;
 its behavior on other devices and firmware versions has not been established.
 
 The default names of the integration's entities follow Home Assistant's
 system language. Their `friendly_name` state attributes can therefore change,
 so templates that compare those names may need updating. Home Assistant may use
-the system language to generate entity IDs on a new installation. Existing
+the system language to generate entity IDs on a new installation. Other existing
 entity IDs and user-assigned names are retained when updating the integration.
 
 For a DDSX220, the device alarm uses the API's `alarm_state`: integer `0` is
