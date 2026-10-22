@@ -87,7 +87,7 @@ This custom component creates following entities for the dehumidifier:
 
 Real Feel is not currently listed as a selectable humidifier mode in Home Assistant.
 
-The default names of the humidifier and device alarm follow Home Assistant's
+The default names of the integration's entities follow Home Assistant's
 system language. Their `friendly_name` state attributes can therefore change,
 so templates that compare those names may need updating. Home Assistant may use
 the system language to generate entity IDs on a new installation. Existing

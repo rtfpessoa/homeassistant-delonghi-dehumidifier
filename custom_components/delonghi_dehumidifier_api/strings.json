@@ -58,6 +58,52 @@
       "device_alarm": {
         "name": "Device alarm"
       }
+    },
+    "sensor": {
+      "current_humidity": {
+        "name": "Current Humidity"
+      },
+      "target_humidity": {
+        "name": "Target Humidity"
+      },
+      "current_speed": {
+        "name": "Current Speed"
+      },
+      "filter_status": {
+        "name": "Filter Status"
+      },
+      "room_temperature": {
+        "name": "Room Temperature"
+      },
+      "heat_exchanger_temperature": {
+        "name": "Heat Exchanger Temperature"
+      },
+      "device_mode": {
+        "name": "Device Mode"
+      },
+      "device_status": {
+        "name": "Device Status"
+      },
+      "eco_mode": {
+        "name": "Eco Mode"
+      },
+      "swing_mode": {
+        "name": "Swing Mode"
+      },
+      "filter_change_alarm": {
+        "name": "Filter Change Alarm"
+      },
+      "filter_life": {
+        "name": "Filter Life"
+      }
+    },
+    "switch": {
+      "eco_mode": {
+        "name": "Eco Mode"
+      },
+      "swing_mode": {
+        "name": "Swing Mode"
+      }
     }
   }
 }
