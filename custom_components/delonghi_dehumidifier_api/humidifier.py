@@ -71,6 +71,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
 
     _attr_should_poll = True
     _attr_has_entity_name = True
+    _attr_translation_key = "unit"
     _attr_device_class = HumidifierDeviceClass.DEHUMIDIFIER
     _attr_max_humidity = 100
     _attr_min_humidity = 0
@@ -91,7 +92,6 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         """Initialize."""
         self.client = client
         self._attr_unique_id = f"{DOMAIN}_{device_dsn}_dehumidifier"
-        self._attr_name = "Unit"
         self._attr_device_info = device_info
         self._poll_generation = 0
         self._completed_poll_generation = 0
