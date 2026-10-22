@@ -115,6 +115,7 @@ async def test_external_change_is_reported_once(
     events = []
     hass.bus.async_listen(EVENT_LOGBOOK_ENTRY, lambda event: events.append(event.data))
     await test_real_feel_buttons.setup(hass, cloud)
+    assert "logbook" not in hass.config.components
     cloud[1].update(device_mode=1, activate_realfeel=REAL_FEEL_ACTIVATION_PAYLOAD)
     await test_real_feel_mode.refresh(hass, cloud)
     await test_real_feel_mode.refresh(hass, cloud)
