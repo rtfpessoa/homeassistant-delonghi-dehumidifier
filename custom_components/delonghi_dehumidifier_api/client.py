@@ -15,6 +15,8 @@ from uuid import uuid4
 import aiohttp
 from homeassistant.exceptions import HomeAssistantError
 
+from .const import REAL_FEEL_ACTIVATION_PAYLOAD
+
 # API Docs: https://docs.aylanetworks.com/reference
 
 # Thanks to https://github.com/duckwc/ECAMpy for the code to token conversion
@@ -584,7 +586,7 @@ class APIClient:
         if mode == Mode.REAL_FEEL:
             return await self.post_request(
                 f"apiv1/dsns/{device_dsn}/properties/activate_realfeel/datapoints.json",
-                {"datapoint": {"value": "AQIDChIXHEY8Mig="}},
+                {"datapoint": {"value": REAL_FEEL_ACTIVATION_PAYLOAD}},
             )
 
         return await self.post_request(

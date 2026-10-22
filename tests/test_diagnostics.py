@@ -1,5 +1,6 @@
 """Test safe diagnostic downloads from real integration setup."""
 
+import asyncio
 import json
 import time
 from unittest.mock import AsyncMock, patch
@@ -11,7 +12,10 @@ from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
-from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from custom_components.delonghi_dehumidifier_api.const import (
+    DOMAIN,
+    REAL_FEEL_ACTIVATION_PAYLOAD,
+)
 from custom_components.delonghi_dehumidifier_api.diagnostics import (
     async_get_config_entry_diagnostics,
 )
@@ -46,6 +50,7 @@ async def diagnostics_entry(hass):
         "alarm_state": 3,
         "set_eco": 0,
         "swing": 1,
+        "activate_realfeel": REAL_FEEL_ACTIVATION_PAYLOAD,
     }
     records = [
         {
@@ -98,10 +103,13 @@ async def test_download_only_exports_allowlisted_property_fields(
     download = await response.json()
     exported = json.dumps(download)
     assert all(secret not in exported for secret in SECRETS)
+    assert REAL_FEEL_ACTIVATION_PAYLOAD not in exported
     data = download["data"]
     assert data["status"] == "available"
     assert isinstance(data["cache_age_seconds"], int)
     assert data["cache_age_seconds"] >= 0
+    assert isinstance(data["request_age_seconds"], int)
+    assert data["request_age_seconds"] >= 0
     assert data["properties"] == {
         "alarm_state": {
             "present": True,
@@ -111,6 +119,20 @@ async def test_download_only_exports_allowlisted_property_fields(
         },
         "set_eco": {"present": True, "value": 0, "ack_enabled": True, "ack_status": 0},
         "swing": {"present": True, "value": 1, "ack_enabled": True, "ack_status": 0},
+        "device_mode": {
+            "present": True,
+            "value": 1,
+            "ack_enabled": True,
+            "ack_status": 0,
+            "value_out_of_range": False,
+        },
+        "activate_realfeel": {
+            "present": True,
+            "value": None,
+            "ack_enabled": True,
+            "ack_status": 0,
+            "matches_activation_command": True,
+        },
     }
     get.assert_not_awaited()
     post.assert_not_awaited()
@@ -156,8 +178,220 @@ async def test_missing_and_malformed_properties_do_not_leak(hass, diagnostics_en
             "ack_enabled": True,
             "ack_status": None,
         },
+        "device_mode": {
+            "present": False,
+            "value": None,
+            "ack_enabled": None,
+            "ack_status": None,
+            "value_out_of_range": None,
+        },
+        "activate_realfeel": {
+            "present": False,
+            "value": None,
+            "ack_enabled": None,
+            "ack_status": None,
+            "matches_activation_command": None,
+        },
     }
     assert all(secret not in json.dumps(data) for secret in SECRETS)
+    get.assert_not_awaited()
+    post.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("value", "expected", "out_of_range"),
+    [
+        (0, 0, False),
+        (42, 42, False),
+        (100, 100, False),
+        (255, 255, False),
+        (-1, None, True),
+        (256, None, True),
+        (2**31 - 1, None, True),
+        (2**31, None, True),
+        (True, None, None),
+        (1.0, None, None),
+        (SECRETS[2], None, None),
+        (None, None, None),
+    ],
+)
+async def test_device_mode_diagnostics_limits_values(
+    hass, diagnostics_entry, value, expected, out_of_range
+):
+    """Mode diagnostics accept only a byte-sized integer, not arbitrary values."""
+    entry, get, post = diagnostics_entry
+    entry.runtime_data.device_properties = [
+        {
+            "name": "device_mode",
+            "value": value,
+            "ack_enabled": SECRETS[0],
+            "ack_status": SECRETS[1],
+            "private": SECRETS[3],
+        }
+    ]
+    data = await async_get_config_entry_diagnostics(hass, entry)
+    assert data["properties"]["device_mode"] == {
+        "present": True,
+        "value": expected,
+        "ack_enabled": None,
+        "ack_status": None,
+        "value_out_of_range": out_of_range,
+    }
+    if type(value) is int and out_of_range:
+        assert str(value) not in json.dumps(data)
+    assert all(secret not in json.dumps(data) for secret in SECRETS)
+    get.assert_not_awaited()
+    post.assert_not_awaited()
+
+
+@pytest.mark.parametrize("name", ["device_mode", "activate_realfeel"])
+@pytest.mark.parametrize(
+    ("ack_status", "expected"),
+    [
+        (0, 0),
+        (255, 255),
+        (-1, None),
+        (256, None),
+        (2**31 - 1, None),
+        (True, None),
+        (SECRETS[2], None),
+    ],
+)
+async def test_mode_acknowledgement_status_is_byte_sized(
+    hass, diagnostics_entry, name, ack_status, expected
+):
+    """New mode properties do not reveal arbitrary acknowledgement numbers."""
+    entry, get, post = diagnostics_entry
+    entry.runtime_data.device_properties = [
+        {"name": name, "value": None, "ack_status": ack_status}
+    ]
+    data = await async_get_config_entry_diagnostics(hass, entry)
+    assert data["properties"][name]["ack_status"] == expected
+    if type(ack_status) is int and not 0 <= ack_status <= 255:
+        assert str(ack_status) not in json.dumps(data)
+    assert all(secret not in json.dumps(data) for secret in SECRETS)
+    get.assert_not_awaited()
+    post.assert_not_awaited()
+
+
+async def test_existing_properties_keep_original_integer_bounds(
+    hass, diagnostics_entry
+):
+    """Privacy bounds for new properties do not change existing diagnostics."""
+    entry, get, post = diagnostics_entry
+    entry.runtime_data.device_properties = [
+        {"name": "alarm_state", "value": -1, "ack_status": 2**31 - 1}
+    ]
+    data = await async_get_config_entry_diagnostics(hass, entry)
+    assert data["properties"]["alarm_state"]["value"] == -1
+    assert data["properties"]["alarm_state"]["ack_status"] == 2**31 - 1
+    get.assert_not_awaited()
+    post.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (REAL_FEEL_ACTIVATION_PAYLOAD, True),
+        (REAL_FEEL_ACTIVATION_PAYLOAD + "x", False),
+        ("", False),
+        (SECRETS[2], False),
+        (0, None),
+        (2**31 - 1, None),
+        (True, None),
+        (None, None),
+        ({"secret": SECRETS[2]}, None),
+        ([REAL_FEEL_ACTIVATION_PAYLOAD], None),
+    ],
+)
+async def test_real_feel_command_comparison_is_exact_and_does_not_export_strings(
+    hass, diagnostics_entry, value, expected
+):
+    """Compare opaque values without exposing them or calling the cloud."""
+    entry, get, post = diagnostics_entry
+    entry.runtime_data.device_properties = [
+        {"name": "activate_realfeel", "value": value}
+    ]
+    data = await async_get_config_entry_diagnostics(hass, entry)
+    assert (
+        data["properties"]["activate_realfeel"]["matches_activation_command"]
+        is expected
+    )
+    assert data["properties"]["activate_realfeel"]["value"] is None
+    exported = json.dumps(data)
+    assert REAL_FEEL_ACTIVATION_PAYLOAD not in exported
+    if type(value) is str and value:
+        assert value not in exported
+    if type(value) is int and value > 255:
+        assert str(value) not in exported
+    assert all(secret not in exported for secret in SECRETS)
+    get.assert_not_awaited()
+    post.assert_not_awaited()
+
+
+async def test_request_age_detects_poll_started_before_a_mode_change(
+    hass, diagnostics_entry
+):
+    """A recently completed GET can still contain an older mode snapshot."""
+    entry, get, post = diagnostics_entry
+    started = asyncio.Event()
+    finish = asyncio.Event()
+    current_mode = 1
+
+    async def delayed_get(_url):
+        snapshot = current_mode
+        started.set()
+        await finish.wait()
+        return [{"property": {"name": "device_mode", "value": snapshot}}]
+
+    get.side_effect = delayed_get
+    entry.runtime_data.device_properties_timestamp = 0
+    with patch("custom_components.delonghi_dehumidifier_api.client.time") as clock:
+        clock.time.side_effect = time.time
+        clock.monotonic.return_value = 850
+        poll = asyncio.create_task(entry.runtime_data.get_properties())
+        await asyncio.wait_for(started.wait(), timeout=1)
+        current_mode = 100
+        finish.set()
+        await poll
+
+    get.reset_mock()
+    with patch("custom_components.delonghi_dehumidifier_api.diagnostics.time") as clock:
+        clock.time.side_effect = time.time
+        clock.monotonic.return_value = 1000
+        data = await async_get_config_entry_diagnostics(hass, entry)
+    assert data["properties"]["device_mode"]["value"] == 1
+    assert current_mode == 100
+    assert data["cache_age_seconds"] < 10
+    assert data["request_age_seconds"] == 150
+    get.assert_not_awaited()
+    post.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "started",
+    [None, -1, True, float("nan"), float("inf"), float("-inf"), SECRETS[2]],
+)
+async def test_invalid_request_start_is_not_reported(hass, diagnostics_entry, started):
+    """Reject absent, invalid or non-finite monotonic timestamps."""
+    entry, get, post = diagnostics_entry
+    entry.runtime_data.device_properties_request_started = started
+    data = await async_get_config_entry_diagnostics(hass, entry)
+    assert data["request_age_seconds"] is None
+    assert all(secret not in json.dumps(data) for secret in SECRETS)
+    get.assert_not_awaited()
+    post.assert_not_awaited()
+
+
+async def test_future_or_missing_request_start_is_not_reported(hass, diagnostics_entry):
+    """Neither future starts nor older clients without a start time are fresh."""
+    entry, get, post = diagnostics_entry
+    entry.runtime_data.device_properties_request_started = time.monotonic() + 3600
+    data = await async_get_config_entry_diagnostics(hass, entry)
+    assert data["request_age_seconds"] is None
+    del entry.runtime_data.device_properties_request_started
+    data = await async_get_config_entry_diagnostics(hass, entry)
+    assert data["request_age_seconds"] is None
     get.assert_not_awaited()
     post.assert_not_awaited()
 
@@ -175,6 +409,7 @@ async def test_failed_poll_with_no_cache_is_unavailable(hass, diagnostics_entry)
     assert data == {
         "status": "unavailable",
         "cache_age_seconds": None,
+        "request_age_seconds": None,
         "properties": {},
     }
     assert all(secret not in json.dumps(data) for secret in SECRETS)

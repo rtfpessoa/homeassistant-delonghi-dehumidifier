@@ -53,7 +53,7 @@ async def test_invalid_mode_rejected_without_a_command(hass, device, mode):
         ("DEHUMIDIFY", "device_mode", 1),
         ("DRY_CLOTHES", "device_mode", 2),
         ("PURIFIER", "device_mode", 3),
-        ("REAL_FEEL", "activate_realfeel", None),
+        ("REAL_FEEL", "activate_realfeel", "AQIDChIXHEY8Mig="),
     ],
 )
 async def test_valid_direct_mode_dispatch(
@@ -68,9 +68,10 @@ async def test_valid_direct_mode_dispatch(
         blocking=True,
     )
     post.assert_awaited_once()
-    assert f"/properties/{property_name}/" in post.await_args.args[0]
-    if expected_value is not None:
-        assert post.await_args.args[1]["datapoint"]["value"] == expected_value
+    post.assert_awaited_once_with(
+        f"apiv1/dsns/TEST-DSN/properties/{property_name}/datapoints.json",
+        {"datapoint": {"value": expected_value}},
+    )
 
 
 async def test_advertised_modes_stay_unchanged(hass, device):
