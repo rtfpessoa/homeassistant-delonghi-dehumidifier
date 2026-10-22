@@ -87,6 +87,12 @@ This custom component creates following entities for the dehumidifier:
 
 Real Feel is not currently listed as a selectable humidifier mode in Home Assistant.
 
+The default names of the humidifier and device alarm follow Home Assistant's
+system language. Their `friendly_name` state attributes can therefore change,
+so templates that compare those names may need updating. Home Assistant may use
+the system language to generate entity IDs on a new installation. Existing
+entity IDs and user-assigned names are retained when updating the integration.
+
 For a DDSX220, the device alarm uses the API's `alarm_state`: integer `0` is
 off, integer `3` is on, and other or missing values are unknown. This mapping
 is based on observations of one device: `3` was observed with a full tank and

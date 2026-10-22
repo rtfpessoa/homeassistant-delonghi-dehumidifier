@@ -47,5 +47,17 @@
       "invalid_auth": "Die Anmeldung ist fehlgeschlagen. Prüfe deine E-Mail-Adresse und dein Passwort oder versuche es später erneut.",
       "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut."
     }
+  },
+  "entity": {
+    "humidifier": {
+      "unit": {
+        "name": "Gerät"
+      }
+    },
+    "binary_sensor": {
+      "device_alarm": {
+        "name": "Gerätealarm"
+      }
+    }
   }
 }

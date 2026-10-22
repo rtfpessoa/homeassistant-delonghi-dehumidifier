@@ -39,6 +39,7 @@ class DeviceAlarm(AuthAvailabilityEntity, BinarySensorEntity):
     """Report known device alarm values without attributing a cause."""
 
     _attr_has_entity_name = True
+    _attr_translation_key = "device_alarm"
     _attr_should_poll = True
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_available = True
@@ -46,7 +47,6 @@ class DeviceAlarm(AuthAvailabilityEntity, BinarySensorEntity):
     def __init__(self, client: APIClient, device_dsn: str, device_info: DeviceInfo):
         """Initialize the alarm entity."""
         self.client = client
-        self._attr_name = "Device alarm"
         self._attr_unique_id = f"{DOMAIN}_{device_dsn}_device_alarm_binary_sensor"
         self._attr_device_info = device_info
         self._attr_is_on = None
