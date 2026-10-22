@@ -663,6 +663,7 @@ class APIClient:
             return await self.get_new_access_token()
         except InvalidCredentialsError:
             self._invalid_credentials = True
+            self._properties_idle.set()
             for listener in tuple(self._auth_listeners):
                 listener()
             self._report_invalid_credentials()
@@ -696,6 +697,7 @@ class APIClient:
     async def async_shutdown(self) -> None:
         """Cancel pending requests when the associated entry is unloaded."""
         self._closed = True
+        self._properties_idle.set()
         self.on_invalid_credentials = None
         requests = [
             request

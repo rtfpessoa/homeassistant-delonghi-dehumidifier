@@ -389,6 +389,9 @@ async def test_auth_rejection_while_waiting_for_old_read(hass, loaded_entry):
             await asyncio.wait_for(posted.wait(), 3)
             with pytest.raises(test_runtime_reauth.InvalidCredentialsError):
                 await client.get_access_token()
+            # Reauth must release the command without waiting for the old GET.
+            await asyncio.wait_for(command, 1)
+            assert not old.done()
             release.set()
             await asyncio.gather(old, command)
             await hass.async_block_till_done()
@@ -441,5 +444,51 @@ async def test_unload_releases_post_command_waiters(hass, device):
                 task.cancel()
         await asyncio.gather(
             *(task for task in (old, command) if task is not None),
+            return_exceptions=True,
+        )
+
+
+async def test_shutdown_wakes_waiters_before_old_request_finishes(hass, device):
+    """Shutdown wakes fresh readers even if a request ignores cancellation."""
+    entry, _, snapshot, get, post, _, _, sensor = device
+    entity_id = humidifier_id(hass)
+    started, posted, cancelled, release = (asyncio.Event() for _ in range(4))
+
+    async def read(_path):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await release.wait()
+        return snapshot()
+
+    async def write(_path, _data):
+        posted.set()
+        return {}
+
+    get.side_effect = read
+    post.side_effect = write
+    client = entry.runtime_data
+    client.device_properties_timestamp = 0
+    old = asyncio.create_task(async_update_entity(hass, sensor))
+    command = shutdown = None
+    try:
+        await asyncio.wait_for(started.wait(), 3)
+        command = asyncio.create_task(
+            hass.services.async_call(
+                "humidifier", "turn_off", {"entity_id": entity_id}, blocking=True
+            )
+        )
+        await asyncio.wait_for(posted.wait(), 3)
+        shutdown = asyncio.create_task(client.async_shutdown())
+        await asyncio.wait_for(cancelled.wait(), 3)
+        await asyncio.wait_for(command, 1)
+        assert not old.done()
+        assert not shutdown.done()
+    finally:
+        release.set()
+        await asyncio.gather(
+            *(task for task in (old, command, shutdown) if task is not None),
             return_exceptions=True,
         )
