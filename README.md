@@ -107,13 +107,22 @@ confirm actuation.
 
 ## Troubleshooting
 
-To investigate tank alarms or switch synchronization, download diagnostics from
-the integration's menu under **Settings > Devices & services**. Take snapshots
-after the device has reported each condition, and describe what you observed.
+To investigate tank alarms, switch synchronization or operating modes, download
+diagnostics from the integration's menu under **Settings > Devices & services**.
+Take snapshots after the device has reported each condition, and describe what
+you observed.
 Allow time for the normal one-minute polling cycle after each change. The
-integration includes only selected numeric property values and acknowledgement
-status from its last successful poll; `cache_age_seconds` indicates their age.
+integration includes selected numeric property values, acknowledgement status,
+and a Real Feel command comparison from its last successful poll.
+`cache_age_seconds` measures time since the request completed, while
+`request_age_seconds` measures time since it started.
 Home Assistant also includes system and integration information in the download.
+For `device_mode`, only integer values from 0 to 255 are shown; other integer
+values are indicated by `value_out_of_range` without showing the number.
+For `activate_realfeel`, `matches_activation_command` compares the cached value
+with this integration's existing activation command without exporting the value.
+A match alone does not confirm device mode or whether the device supports it;
+a nonmatch does not prove Real Feel is off.
 
 Debug logging can be activated without going through setup process:
 
