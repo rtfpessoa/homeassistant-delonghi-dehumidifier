@@ -335,9 +335,10 @@ async def test_cancelled_command_waiting_for_lock_does_not_invalidate(hass, devi
     """A command canceled before it starts cannot discard a good snapshot."""
     entry, _, _, get, post, *_ = device
     entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
-    generations = entity._command_generation, entry.runtime_data._properties_generation
+    commands = entry.runtime_data.humidifier_commands
+    generations = commands.generation, entry.runtime_data._properties_generation
     reads = get.await_count
-    await entity._command_lock.acquire()
+    await commands._lock.acquire()
     task = asyncio.create_task(entity.async_turn_off())
     try:
         await asyncio.sleep(0)
@@ -345,10 +346,10 @@ async def test_cancelled_command_waiting_for_lock_does_not_invalidate(hass, devi
         with pytest.raises(asyncio.CancelledError):
             await task
     finally:
-        entity._command_lock.release()
+        commands._lock.release()
     await hass.async_block_till_done()
     assert (
-        entity._command_generation,
+        commands.generation,
         entry.runtime_data._properties_generation,
     ) == generations
     assert get.await_count == reads
