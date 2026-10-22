@@ -10,6 +10,7 @@ from homeassistant.components.humidifier import HumidifierDeviceClass, Humidifie
 from homeassistant.components.humidifier.const import HumidifierEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -181,7 +182,10 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
     async def async_set_mode(self, mode: str) -> None:
         """Set new target mode."""
         _LOGGER.debug("Setting mode %s mode to %s", self._attr_unique_id, mode)
-        await self._command(lambda: self.client.set_mode(MODE_BY_NAME.get(mode)))
+        target = MODE_BY_NAME.get(mode)
+        if target is None:
+            raise ServiceValidationError(f"Unsupported dehumidifier mode: {mode!r}")
+        await self._command(lambda: self.client.set_mode(target))
 
     async def async_set_humidity(self, humidity: int) -> None:
         """Set new target humidity."""
