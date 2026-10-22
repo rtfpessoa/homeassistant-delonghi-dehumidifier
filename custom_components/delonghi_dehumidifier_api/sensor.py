@@ -222,7 +222,7 @@ class GenericSensor(AuthAvailabilityEntity, SensorEntity):
         self._attr_unique_id = (
             f"{DOMAIN}_{device_dsn}_{re.sub(r'\s+', '_', type_name.lower())}_sensor"
         )
-        self._attr_name = type_name
+        self._attr_translation_key = re.sub(r"\s+", "_", type_name.lower())
         self._attr_device_info = device_info
         self._get_value = get_value
         self._attr_device_class = device_class
