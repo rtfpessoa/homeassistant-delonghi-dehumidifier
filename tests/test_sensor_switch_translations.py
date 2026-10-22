@@ -4,16 +4,20 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
+from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD, EntityCategory
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity_component import async_update_entity
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api import sensor, switch
 from custom_components.delonghi_dehumidifier_api.client import APIClient
-from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from custom_components.delonghi_dehumidifier_api.const import (
+    DOMAIN,
+    REAL_FEEL_ACTIVATION_PAYLOAD,
+)
 
 # Keys are derived from the original English type_name, which also defines unique IDs.
 SENSOR_NAMES = {
@@ -26,7 +30,7 @@ SENSOR_NAMES = {
         "Heat Exchanger Temperature",
         "Wärmetauschertemperatur",
     ),
-    "device_mode": ("Device Mode", "Gerätemodus"),
+    "device_mode": ("Cloud mode (raw)", "Cloud-Modus (Rohwert)"),
     "device_status": ("Device Status", "Gerätestatus"),
     "eco_mode": ("Eco Mode", "Eco-Modus"),
     "swing_mode": ("Swing Mode", "Schwenkmodus"),
@@ -167,12 +171,94 @@ async def test_new_sensor_and_switch_names(hass, cloud, language):
     assert_names(hass, registry, translations, language)
 
 
+@pytest.mark.parametrize("language", ["en", "de"])
+@pytest.mark.parametrize("custom_name", [None, "My chosen mode"])
+async def test_cloud_mode_upgrade_keeps_ids_values_and_automation(
+    hass, cloud, language, custom_name
+):
+    """The clarified name does not change a user's raw-mode automation."""
+    hass.config.language = language
+    entry, values = cloud
+    values.update(
+        firmware_version="1.0", activate_realfeel=REAL_FEEL_ACTIVATION_PAYLOAD
+    )
+    registry = er.async_get(hass)
+    old = registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        unique_id("sensor", "device_mode"),
+        config_entry=entry,
+        original_name="Gerätemodus" if language == "de" else "Device Mode",
+        translation_key="device_mode",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    )
+    old = registry.async_update_entity(
+        old.entity_id, new_entity_id="sensor.my_existing_device_mode", name=custom_name
+    )
+    old_identity = (old.id, old.entity_id, old.unique_id)
+    events = []
+    hass.bus.async_listen("raw_mode_automation", events.append)
+    assert await async_setup_component(
+        hass,
+        "automation",
+        {
+            "automation": [
+                {
+                    "id": "raw_mode_automation",
+                    "alias": "Existing raw mode automation",
+                    "trigger": [
+                        {
+                            "platform": "state",
+                            "entity_id": old.entity_id,
+                            "to": "DRY_CLOTHES",
+                        }
+                    ],
+                    "action": [{"event": "raw_mode_automation"}],
+                }
+            ]
+        },
+    )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    current = registered(registry, "sensor", "device_mode")
+    assert (current.id, current.entity_id, current.unique_id) == old_identity
+    assert current.name == custom_name
+    assert current.original_name == SENSOR_NAMES["device_mode"][language == "de"]
+    assert current.entity_category == EntityCategory.DIAGNOSTIC
+    state = hass.states.get(current.entity_id)
+    assert state.state == "DEHUMIDIFY"
+    assert state.attributes["options"] == [
+        "DEHUMIDIFY",
+        "DRY_CLOTHES",
+        "PURIFIER",
+        "REAL_FEEL",
+    ]
+    assert state.attributes["friendly_name"] == (
+        custom_name
+        or f"Test Dehumidifier {SENSOR_NAMES['device_mode'][language == 'de']}"
+    )
+    humidifier = registry.async_get_entity_id(
+        "humidifier", DOMAIN, f"{DOMAIN}_test-dsn_dehumidifier"
+    )
+    assert hass.states.get(humidifier).attributes["mode"] == "REAL_FEEL"
+
+    values["device_mode"] = 2
+    entry.runtime_data.invalidate_properties()
+    await async_update_entity(hass, current.entity_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(current.entity_id).state == "DRY_CLOTHES"
+    assert len(events) == 1
+
+
 def assert_before_names(registry):
     """Confirm every original entity has its hardcoded English name."""
     for domain, names in ENTITY_NAMES.items():
         for key, (english, _) in names.items():
             entry = registered(registry, domain, key)
-            assert entry.original_name == english
+            legacy_name = (
+                "Device Mode" if (domain, key) == ("sensor", "device_mode") else english
+            )
+            assert entry.original_name == legacy_name
             assert entry.translation_key is None
 
 

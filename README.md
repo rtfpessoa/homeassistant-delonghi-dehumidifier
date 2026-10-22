@@ -75,7 +75,7 @@ This custom component creates following entities for the dehumidifier:
 | `sensor`     | Sensors for filter status.                                                                                                       |
 | `sensor`     | Sensors for room temperature.                                                                                                    |
 | `sensor`     | Sensors for heat exchanger temperature.                                                                                          |
-| `sensor`     | Sensors for dehumidifier mode.                                                                                                   |
+| `sensor`     | Diagnostic sensor for the cloud's raw mode value.                                                                                |
 | `sensor`     | Sensors for dehumidifier status.                                                                                                 |
 | `sensor`     | Sensors for eco mode.                                                                                                            |
 | `sensor`     | Sensors for swing mode.                                                                                                          |
@@ -85,6 +85,13 @@ This custom component creates following entities for the dehumidifier:
 | `button`     | Request exit from Real Feel on the tested DDSX220 with firmware 1.0.                                                              |
 | `switch`     | Switch to enable eco mode.                                                                                                       |
 | `switch`     | Switch to enable fan swing.                                                                                                      |
+
+The **Cloud mode (raw)** diagnostic sensor shows the cloud's `device_mode`
+value as a name. On the tested DDSX220, it can read `DEHUMIDIFY` while Real Feel
+is active. The humidifier's mode selector shows the integration's best-effort
+estimate instead.
+Existing entity IDs and user-assigned names stay unchanged. For a new install,
+Home Assistant generates the entity ID from the new label.
 
 On a DDSX220 with firmware 1.0, the humidifier offers `REAL_FEEL` in its mode
 selector. Selecting `DEHUMIDIFY` while Real Feel is reported sends the tested

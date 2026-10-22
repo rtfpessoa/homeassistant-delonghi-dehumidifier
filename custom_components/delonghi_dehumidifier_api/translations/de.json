@@ -79,7 +79,7 @@
         "name": "Wärmetauschertemperatur"
       },
       "device_mode": {
-        "name": "Gerätemodus"
+        "name": "Cloud-Modus (Rohwert)"
       },
       "device_status": {
         "name": "Gerätestatus"
