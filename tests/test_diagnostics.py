@@ -28,6 +28,7 @@ SECRETS = (
     "https://private.example/diagnostics-secret",
     "diagnostics-private-message",
 )
+CANDIDATE_DEACTIVATION_PAYLOAD = "AAIDChIXHEY8Mig="
 
 
 @pytest.fixture
@@ -89,12 +90,23 @@ async def diagnostics_entry(hass):
         await hass.config_entries.async_unload(entry.entry_id)
 
 
+@pytest.mark.parametrize(
+    ("raw_value", "activation_match", "candidate_match"),
+    [
+        (REAL_FEEL_ACTIVATION_PAYLOAD, True, False),
+        (CANDIDATE_DEACTIVATION_PAYLOAD, False, True),
+        (SECRETS[2], False, False),
+    ],
+)
 async def test_download_only_exports_allowlisted_property_fields(
-    hass, hass_client, diagnostics_entry
+    hass, hass_client, diagnostics_entry, raw_value, activation_match, candidate_match
 ):
     """Real HA download excludes secrets and does not call the cloud."""
     entry, get, post = diagnostics_entry
     entry.runtime_data.access_token = SECRETS[2]
+    for prop in entry.runtime_data.device_properties:
+        if prop.get("name") == "activate_realfeel":
+            prop["value"] = raw_value
     assert await async_setup_component(hass, "diagnostics", {})
     await hass.async_block_till_done()
     client = await hass_client()
@@ -104,6 +116,7 @@ async def test_download_only_exports_allowlisted_property_fields(
     exported = json.dumps(download)
     assert all(secret not in exported for secret in SECRETS)
     assert REAL_FEEL_ACTIVATION_PAYLOAD not in exported
+    assert CANDIDATE_DEACTIVATION_PAYLOAD not in exported
     data = download["data"]
     assert data["status"] == "available"
     assert isinstance(data["cache_age_seconds"], int)
@@ -131,7 +144,8 @@ async def test_download_only_exports_allowlisted_property_fields(
             "value": None,
             "ack_enabled": True,
             "ack_status": 0,
-            "matches_activation_command": True,
+            "matches_activation_command": activation_match,
+            "matches_candidate_deactivation_command": candidate_match,
         },
     }
     get.assert_not_awaited()
@@ -191,6 +205,7 @@ async def test_missing_and_malformed_properties_do_not_leak(hass, diagnostics_en
             "ack_enabled": None,
             "ack_status": None,
             "matches_activation_command": None,
+            "matches_candidate_deactivation_command": None,
         },
     }
     assert all(secret not in json.dumps(data) for secret in SECRETS)
@@ -290,22 +305,24 @@ async def test_existing_properties_keep_original_integer_bounds(
 
 
 @pytest.mark.parametrize(
-    ("value", "expected"),
+    ("value", "activation_match", "candidate_match"),
     [
-        (REAL_FEEL_ACTIVATION_PAYLOAD, True),
-        (REAL_FEEL_ACTIVATION_PAYLOAD + "x", False),
-        ("", False),
-        (SECRETS[2], False),
-        (0, None),
-        (2**31 - 1, None),
-        (True, None),
-        (None, None),
-        ({"secret": SECRETS[2]}, None),
-        ([REAL_FEEL_ACTIVATION_PAYLOAD], None),
+        (REAL_FEEL_ACTIVATION_PAYLOAD, True, False),
+        (CANDIDATE_DEACTIVATION_PAYLOAD, False, True),
+        (REAL_FEEL_ACTIVATION_PAYLOAD + "x", False, False),
+        (CANDIDATE_DEACTIVATION_PAYLOAD + "x", False, False),
+        ("", False, False),
+        (SECRETS[2], False, False),
+        (0, None, None),
+        (2**31 - 1, None, None),
+        (True, None, None),
+        (None, None, None),
+        ({"secret": SECRETS[2]}, None, None),
+        ([REAL_FEEL_ACTIVATION_PAYLOAD], None, None),
     ],
 )
 async def test_real_feel_command_comparison_is_exact_and_does_not_export_strings(
-    hass, diagnostics_entry, value, expected
+    hass, diagnostics_entry, value, activation_match, candidate_match
 ):
     """Compare opaque values without exposing them or calling the cloud."""
     entry, get, post = diagnostics_entry
@@ -315,11 +332,18 @@ async def test_real_feel_command_comparison_is_exact_and_does_not_export_strings
     data = await async_get_config_entry_diagnostics(hass, entry)
     assert (
         data["properties"]["activate_realfeel"]["matches_activation_command"]
-        is expected
+        is activation_match
+    )
+    assert (
+        data["properties"]["activate_realfeel"][
+            "matches_candidate_deactivation_command"
+        ]
+        is candidate_match
     )
     assert data["properties"]["activate_realfeel"]["value"] is None
     exported = json.dumps(data)
     assert REAL_FEEL_ACTIVATION_PAYLOAD not in exported
+    assert CANDIDATE_DEACTIVATION_PAYLOAD not in exported
     if type(value) is str and value:
         assert value not in exported
     if type(value) is int and value > 255:

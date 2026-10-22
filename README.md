@@ -86,6 +86,9 @@ This custom component creates following entities for the dehumidifier:
 | `switch`     | Switch to enable fan swing.                                                                                                      |
 
 Real Feel is not currently listed as a selectable humidifier mode in Home Assistant.
+On one tested DDSX220, selecting `DEHUMIDIFY` in Home Assistant left the
+De'Longhi app showing Real Feel. Dehumidify was selected using the De'Longhi app
+on that device. Behavior on other devices has not been established.
 
 The default names of the integration's entities follow Home Assistant's
 system language. Their `friendly_name` state attributes can therefore change,
@@ -113,16 +116,18 @@ Take snapshots after the device has reported each condition, and describe what
 you observed.
 Allow time for the normal one-minute polling cycle after each change. The
 integration includes selected numeric property values, acknowledgement status,
-and a Real Feel command comparison from its last successful poll.
+and Real Feel command comparisons from its last successful poll.
 `cache_age_seconds` measures time since the request completed, while
 `request_age_seconds` measures time since it started.
 Home Assistant also includes system and integration information in the download.
 For `device_mode`, only integer values from 0 to 255 are shown; other integer
 values are indicated by `value_out_of_range` without showing the number.
 For `activate_realfeel`, `matches_activation_command` compares the cached value
-with this integration's existing activation command without exporting the value.
-A match alone does not confirm device mode or whether the device supports it;
-a nonmatch does not prove Real Feel is off.
+with this integration's existing activation command.
+`matches_candidate_deactivation_command` compares it with a possible exit
+command. Neither comparison exports the value, and a match alone does not
+confirm the device's mode or the command's effect. A nonmatch does not prove
+Real Feel is off.
 
 Debug logging can be activated without going through setup process:
 

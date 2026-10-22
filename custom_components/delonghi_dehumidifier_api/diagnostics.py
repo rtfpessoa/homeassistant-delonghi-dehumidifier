@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from . import DeLonghiDehumidifierConfigEntry
 from .const import REAL_FEEL_ACTIVATION_PAYLOAD
 
+_CANDIDATE_DEACTIVATION_PAYLOAD = "AAIDChIXHEY8Mig="
 _PROPERTY_NAMES = (
     "alarm_state",
     "set_eco",
@@ -58,6 +59,11 @@ def _safe_property_value(name: str, value: Any) -> int | None:
     return _small_integer(value)
 
 
+def _matches_command(value: Any, expected: str) -> bool | None:
+    """Compare strings without reporting their contents."""
+    return value == expected if type(value) is str else None
+
+
 def _export_property(name: str, item: dict[str, Any]) -> dict[str, Any]:
     """Export only the explicitly allowed information for one property."""
     value = item.get("value")
@@ -78,8 +84,11 @@ def _export_property(name: str, item: dict[str, Any]) -> dict[str, Any]:
             not 0 <= value <= 255 if type(value) is int else None
         )
     if name == "activate_realfeel":
-        result["matches_activation_command"] = (
-            value == REAL_FEEL_ACTIVATION_PAYLOAD if type(value) is str else None
+        result["matches_activation_command"] = _matches_command(
+            value, REAL_FEEL_ACTIVATION_PAYLOAD
+        )
+        result["matches_candidate_deactivation_command"] = _matches_command(
+            value, _CANDIDATE_DEACTIVATION_PAYLOAD
         )
     return result
 
@@ -104,6 +113,7 @@ async def async_get_config_entry_diagnostics(
     }
     properties["device_mode"]["value_out_of_range"] = None
     properties["activate_realfeel"]["matches_activation_command"] = None
+    properties["activate_realfeel"]["matches_candidate_deactivation_command"] = None
     for item in cached_properties:
         if not isinstance(item, dict):
             continue
