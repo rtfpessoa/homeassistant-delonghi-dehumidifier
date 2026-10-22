@@ -25,19 +25,22 @@ def login_error_session(error_code):
         get=AsyncMock(
             side_effect=[
                 SimpleNamespace(
-                    headers={"Location": "https://example.invalid/?context=test"}
+                    status=302,
+                    headers={"Location": "https://example.invalid/?context=test"},
                 ),
                 SimpleNamespace(
+                    status=200,
                     text=AsyncMock(
                         return_value=json.dumps(
                             {"ucid": "ucid", "gmid": "gmid", "gmidTicket": "ticket"}
                         )
-                    )
+                    ),
                 ),
             ]
         ),
         post=AsyncMock(
             return_value=SimpleNamespace(
+                status=200,
                 text=AsyncMock(
                     return_value=json.dumps(
                         {
@@ -45,7 +48,7 @@ def login_error_session(error_code):
                             "statusCode": 500 if error_code >= 500000 else 403,
                         }
                     )
-                )
+                ),
             )
         ),
     )
@@ -105,24 +108,29 @@ async def test_successful_authentication_passes_login_token_to_provider():
     """A successful provider login continues through the full token exchange."""
 
     def json_response(data):
-        return SimpleNamespace(text=AsyncMock(return_value=json.dumps(data)))
+        return SimpleNamespace(
+            status=200, text=AsyncMock(return_value=json.dumps(data))
+        )
 
     session = SimpleNamespace(
         get=AsyncMock(
             side_effect=[
                 SimpleNamespace(
+                    status=302,
                     headers={
                         "Location": "https://example.invalid/?context=test-context"
-                    }
+                    },
                 ),
                 json_response(
                     {"ucid": "test-ucid", "gmid": "test-gmid", "gmidTicket": "ticket"}
                 ),
                 SimpleNamespace(
-                    text=AsyncMock(return_value="const consentObj2Sig = 'signature';")
+                    status=200,
+                    text=AsyncMock(return_value="const consentObj2Sig = 'signature';"),
                 ),
                 SimpleNamespace(
-                    headers={"Location": "https://example.invalid/?code=test-code"}
+                    status=302,
+                    headers={"Location": "https://example.invalid/?code=test-code"},
                 ),
             ]
         ),

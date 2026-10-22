@@ -86,7 +86,7 @@ class AuthAvailabilityEntity(Entity):
         if not self._accept_poll(generation):
             return
         if self.available and not isinstance(err, InvalidCredentialsError):
-            logger.warning("Unable to update %s (%s)", self.name, type(err).__name__)
+            logger.warning("Unable to update entity (%s)", type(err).__name__)
         self._attr_available = False
 
     @property

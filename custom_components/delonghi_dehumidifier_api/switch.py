@@ -94,7 +94,7 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
         self._last_successful_command_generation = 0
         self._last_command_completed = None
         self._skip_next_poll = False
-        _LOGGER.debug("Initialized %s", self._attr_unique_id)
+        _LOGGER.debug("Initialized switch")
 
     @property
     def is_on(self):
@@ -103,7 +103,7 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs):
         """Turn the switch on."""
-        _LOGGER.debug("Turning on %s", self._attr_unique_id)
+        _LOGGER.debug("Turning on switch")
         async with self._command_lock:
             # A pending skip belongs to an earlier command.
             self._skip_next_poll = False
@@ -121,7 +121,7 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
-        _LOGGER.debug("Turning off %s", self._attr_unique_id)
+        _LOGGER.debug("Turning off switch")
         async with self._command_lock:
             # A pending skip belongs to an earlier command.
             self._skip_next_poll = False
@@ -162,9 +162,7 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
                 return
             # A failed poll must not leave an old state displayed.
             if self.available:
-                _LOGGER.warning(
-                    "Unable to update %s (%s)", self.name, type(err).__name__
-                )
+                _LOGGER.warning("Unable to update switch (%s)", type(err).__name__)
             self._attr_available = False
             return
 

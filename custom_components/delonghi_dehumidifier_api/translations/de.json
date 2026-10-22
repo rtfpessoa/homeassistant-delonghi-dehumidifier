@@ -21,7 +21,8 @@
     "error": {
       "cannot_connect": "Die Verbindung zu De'Longhi konnte nicht hergestellt werden. Bitte versuche es erneut.",
       "invalid_auth": "Die Anmeldung ist fehlgeschlagen. Prüfe deine E-Mail-Adresse und dein Passwort oder versuche es später erneut.",
-      "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut."
+      "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut.",
+      "no_devices": "In diesem De'Longhi-Konto wurden keine Geräte gefunden. Füge zuerst ein Gerät in der De'Longhi-App hinzu."
     },
     "abort": {
       "already_configured": "Dieses Gerät ist bereits eingerichtet.",
@@ -45,7 +46,9 @@
     },
     "error": {
       "invalid_auth": "Die Anmeldung ist fehlgeschlagen. Prüfe deine E-Mail-Adresse und dein Passwort oder versuche es später erneut.",
-      "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut."
+      "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut.",
+      "no_devices": "In diesem De'Longhi-Konto wurden keine Geräte gefunden. Füge zuerst ein Gerät in der De'Longhi-App hinzu.",
+      "cannot_connect": "Die Verbindung zu De'Longhi konnte nicht hergestellt werden. Bitte versuche es erneut."
     }
   },
   "entity": {

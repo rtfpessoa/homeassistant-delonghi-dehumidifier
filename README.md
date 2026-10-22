@@ -186,7 +186,9 @@ logger:
 
 Home Assistant needs to be restarted after this change.
 
-Select `Load Full Home Assistant Log` to see all debug mode logs. Please include as much logs as possible if you open an [issue](https://github.com/rtfpessoa/homeassistant-delonghi-dehumidifier/issues/new?assignees=&labels=&template=issue.md).
+Before sharing diagnostics or logs in an [issue](https://github.com/rtfpessoa/homeassistant-delonghi-dehumidifier/issues/new?assignees=&labels=&template=issue.md), inspect and redact them. Remove device identifiers, addresses, credentials, tokens and other private information. Include only excerpts relevant to the problem, not the full Home Assistant log.
+
+The integration's diagnostics contain a limited selection of data, but Home Assistant may add system and integration details to the download. The integration's logging controls do not sanitize logs from Home Assistant or other components, including logs containing chained exceptions.
 
 [![Home Assistant Logs][ha-logs-badge]][ha-logs]
 

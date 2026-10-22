@@ -21,7 +21,8 @@
     "error": {
       "cannot_connect": "Could not connect to De'Longhi. Please try again.",
       "invalid_auth": "Could not sign in. Check your email and password, or try again later.",
-      "unknown": "An unexpected error occurred. Please try again."
+      "unknown": "An unexpected error occurred. Please try again.",
+      "no_devices": "No devices were found in this De'Longhi account. Add a device in the De'Longhi app first."
     },
     "abort": {
       "already_configured": "This device is already configured.",
@@ -45,7 +46,9 @@
     },
     "error": {
       "invalid_auth": "Could not sign in. Check your email and password, or try again later.",
-      "unknown": "An unexpected error occurred. Please try again."
+      "unknown": "An unexpected error occurred. Please try again.",
+      "no_devices": "No devices were found in this De'Longhi account. Add a device in the De'Longhi app first.",
+      "cannot_connect": "Could not connect to De'Longhi. Please try again."
     }
   },
   "entity": {

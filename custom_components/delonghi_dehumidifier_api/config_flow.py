@@ -19,7 +19,12 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import aiohttp_client
 
-from .client import APIClient, InvalidCredentialsError
+from .client import (
+    APIClient,
+    InvalidCredentialsError,
+    NoDevicesError,
+    TransientCloudError,
+)
 from .const import DOMAIN, RUNTIME_REAUTH_ID
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,14 +50,14 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     )
     try:
         authenticated = await client.authenticate()
+        if not authenticated:
+            raise InvalidAuth
+        product_name = await client.get_product_name()
+        return {"title": product_name}
     except InvalidCredentialsError as err:
         raise InvalidAuth from err
-    if not authenticated:
-        raise InvalidAuth
-
-    product_name = await client.get_product_name()
-
-    return {"title": product_name}
+    finally:
+        await client.async_shutdown()
 
 
 class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -93,10 +98,12 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 authenticated = await client.authenticate()
             except InvalidCredentialsError:
                 errors["base"] = "invalid_auth"
-            except (aiohttp.ClientError, TimeoutError):
+            except (aiohttp.ClientError, TimeoutError, TransientCloudError):
                 errors["base"] = "cannot_connect"
-            except Exception:
-                _LOGGER.exception("Unexpected exception during reauthentication")
+            except Exception as err:  # noqa: BLE001 - classify unexpected flow errors
+                _LOGGER.error(
+                    "Unexpected reauthentication error (%s)", type(err).__name__
+                )
                 errors["base"] = "unknown"
             else:
                 if authenticated:
@@ -107,6 +114,8 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         user_input[CONF_PASSWORD],
                     )
                 errors["base"] = "unknown"
+            finally:
+                await client.async_shutdown()
 
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -156,8 +165,12 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 info = await validate_input(self.hass, user_input)
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
-            except Exception:
-                _LOGGER.exception("Unexpected exception")
+            except (aiohttp.ClientError, TimeoutError, TransientCloudError):
+                errors["base"] = "cannot_connect"
+            except NoDevicesError:
+                errors["base"] = "no_devices"
+            except Exception as err:  # noqa: BLE001 - classify unexpected flow errors
+                _LOGGER.error("Unexpected setup flow error (%s)", type(err).__name__)
                 errors["base"] = "unknown"
             else:
                 return self.async_create_entry(title=info["title"], data=user_input)
@@ -184,8 +197,12 @@ class DeLonghiOptionsFlow(config_entries.OptionsFlow):
                 info = await validate_input(self.hass, user_input)
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
-            except Exception:
-                _LOGGER.exception("Unexpected exception")
+            except (aiohttp.ClientError, TimeoutError, TransientCloudError):
+                errors["base"] = "cannot_connect"
+            except NoDevicesError:
+                errors["base"] = "no_devices"
+            except Exception as err:  # noqa: BLE001 - classify unexpected flow errors
+                _LOGGER.error("Unexpected options flow error (%s)", type(err).__name__)
                 errors["base"] = "unknown"
             else:
                 return self.async_create_entry(title=info["title"], data=user_input)
