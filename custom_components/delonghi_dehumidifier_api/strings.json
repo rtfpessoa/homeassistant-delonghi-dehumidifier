@@ -133,5 +133,11 @@
     "real_feel_enter_write_failed": {
       "message": "The Real Feel request failed; the device may have received it. Check the De'Longhi app before trying again."
     }
+  },
+  "common": {
+    "mode_activity_dehumidify": "Reported mode: Dehumidify",
+    "mode_activity_dry_clothes": "Reported mode: Dry clothes",
+    "mode_activity_purifier": "Reported mode: Purifier",
+    "mode_activity_real_feel": "Reported mode: Real Feel"
   }
 }
