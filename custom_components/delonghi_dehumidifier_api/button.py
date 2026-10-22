@@ -14,6 +14,7 @@ from .const import (
     REAL_FEEL_ACTIVATION_PAYLOAD,
 )
 from .entity import AuthAvailabilityEntity
+from .real_feel import property_value, supports_real_feel
 from .utils import fetch_device_info
 
 _DEVICE_REMOVED = (
@@ -36,30 +37,6 @@ def _validation_error(key: str, message: str) -> ServiceValidationError:
     )
 
 
-def _value(properties: list[dict], name: str):
-    """Read exactly one property, rejecting missing and duplicate values."""
-    if type(properties) is not list or any(
-        type(item) is not dict for item in properties
-    ):
-        return None
-    matches = [item.get("value") for item in properties if item.get("name") == name]
-    return matches[0] if len(matches) == 1 else None
-
-
-def _supported(properties: list[dict]) -> bool:
-    """Recognize only the model and firmware tested on the appliance."""
-    model = _value(properties, "appliance_model")
-    firmware = _value(properties, "firmware_version")
-    return (
-        type(model) is str
-        and model == "DDSX220"
-        and (
-            (type(firmware) is str and firmware == "1.0")
-            or (type(firmware) is float and firmware == 1.0)
-        )
-    )
-
-
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry[APIClient],
@@ -67,7 +44,7 @@ async def async_setup_entry(
 ) -> None:
     """Add the button only when the cached identity matches the tested device."""
     client = config_entry.runtime_data
-    if not _supported(await client.get_properties()):
+    if not supports_real_feel(await client.get_properties()):
         return
     device_info = await fetch_device_info(client)
     device_dsn = await client.get_first_device()
@@ -79,6 +56,7 @@ class RealFeelExitButton(AuthAvailabilityEntity, ButtonEntity):
 
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
+    _attr_entity_registry_visible_default = False
     _attr_should_poll = False
     _attr_translation_key = "request_exit_real_feel"
 
@@ -116,12 +94,12 @@ class RealFeelExitButton(AuthAvailabilityEntity, ButtonEntity):
             ) from None
         if self._removed:
             raise _validation_error("device_removed", _DEVICE_REMOVED)
-        if not _supported(properties):
+        if not supports_real_feel(properties):
             raise _validation_error("real_feel_unsupported", _UNSUPPORTED)
-        mode = _value(properties, "device_mode")
+        mode = property_value(properties, "device_mode")
         if type(mode) is not int or mode != 1:
             raise _validation_error("real_feel_not_ready", _NOT_READY)
-        previous = _value(properties, "activate_realfeel")
+        previous = property_value(properties, "activate_realfeel")
         if type(previous) is not str or previous != REAL_FEEL_ACTIVATION_PAYLOAD:
             raise _validation_error("real_feel_not_ready", _NOT_READY)
 

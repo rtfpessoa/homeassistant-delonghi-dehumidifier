@@ -121,11 +121,17 @@
     "real_feel_not_ready": {
       "message": "The cloud data is not ready for this request. Select Real Feel in the De'Longhi app, wait for it to sync, and try again."
     },
+    "real_feel_mode_not_ready": {
+      "message": "The device mode is not ready. Wait for the De'Longhi app to sync, then try again."
+    },
     "real_feel_read_failed": {
       "message": "Unable to check the current device data. Check the connection and try again."
     },
     "real_feel_write_failed": {
       "message": "The Real Feel exit request failed; the device may have received it. Check the De'Longhi app before trying again."
+    },
+    "real_feel_enter_write_failed": {
+      "message": "The Real Feel request failed; the device may have received it. Check the De'Longhi app before trying again."
     }
   }
 }

@@ -121,11 +121,17 @@
     "real_feel_not_ready": {
       "message": "Die Cloud-Daten sind für diese Anfrage noch nicht bereit. Wähle Real Feel in der De'Longhi-App, warte auf die Synchronisierung und versuche es erneut."
     },
+    "real_feel_mode_not_ready": {
+      "message": "Der Gerätemodus ist noch nicht bereit. Warte auf die Synchronisierung der De'Longhi-App und versuche es erneut."
+    },
     "real_feel_read_failed": {
       "message": "Die aktuellen Gerätedaten konnten nicht geprüft werden. Prüfe die Verbindung und versuche es erneut."
     },
     "real_feel_write_failed": {
       "message": "Die Anfrage zum Beenden von Real Feel ist fehlgeschlagen; das Gerät könnte sie erhalten haben. Prüfe die De'Longhi-App, bevor du es erneut versuchst."
+    },
+    "real_feel_enter_write_failed": {
+      "message": "Die Anfrage für Real Feel ist fehlgeschlagen; das Gerät könnte sie erhalten haben. Prüfe die De'Longhi-App, bevor du es erneut versuchst."
     }
   }
 }

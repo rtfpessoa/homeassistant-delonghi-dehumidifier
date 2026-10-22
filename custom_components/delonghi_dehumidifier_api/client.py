@@ -605,6 +605,15 @@ class APIClient:
             allow_redirects=False,
         )
 
+    async def request_enter_real_feel(self) -> dict:
+        """Send one Real Feel activation request without following redirects."""
+        device_dsn = await self.get_first_device()
+        return await self.post_request(
+            f"apiv1/dsns/{device_dsn}/properties/activate_realfeel/datapoints.json",
+            {"datapoint": {"value": REAL_FEEL_ACTIVATION_PAYLOAD}},
+            allow_redirects=False,
+        )
+
     async def set_swing(self, status: OffOnStatus) -> dict:
         """Set the swing operation mode.
 
