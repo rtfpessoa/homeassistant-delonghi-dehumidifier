@@ -14,6 +14,7 @@ from .const import RUNTIME_REAUTH_ID
 
 _PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
+    Platform.BUTTON,
     Platform.HUMIDIFIER,
     Platform.SENSOR,
     Platform.SWITCH,
