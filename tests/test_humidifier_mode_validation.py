@@ -16,10 +16,9 @@ async def test_invalid_mode_rejected_without_a_command(hass, device, mode):
     """Invalid inputs leave device state and the cloud command path untouched."""
     entry, _, _, get, post, *_ = device
     entity_id = humidifier_id(hass)
-    entity = hass.data["humidifier"].get_entity(entity_id)
     state = hass.states.get(entity_id).as_dict()
     generations = (
-        entity._command_generation,
+        entry.runtime_data.humidifier_commands.generation,
         entry.runtime_data._properties_generation,
     )
     reads = get.await_count
@@ -41,7 +40,7 @@ async def test_invalid_mode_rejected_without_a_command(hass, device, mode):
     post.assert_not_awaited()
     assert get.await_count == reads
     assert (
-        entity._command_generation,
+        entry.runtime_data.humidifier_commands.generation,
         entry.runtime_data._properties_generation,
     ) == generations
     assert hass.states.get(entity_id).as_dict() == state

@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Any
 
@@ -95,8 +94,6 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         self._attr_device_info = device_info
         self._poll_generation = 0
         self._completed_poll_generation = 0
-        self._command_lock = asyncio.Lock()
-        self._command_generation = 0
         self._refresh_handle: asyncio.Handle | None = None
         self._removed = False
         _LOGGER.debug("Initialized %s", self._attr_unique_id)
@@ -104,6 +101,9 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         self.async_on_remove(self._cancel_refresh)
+        self.async_on_remove(
+            self.client.humidifier_commands.subscribe_refresh(self._schedule_refresh)
+        )
         await self.async_update()
 
     def _cancel_refresh(self) -> None:
@@ -125,35 +125,22 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
 
         self._refresh_handle = self.hass.loop.call_soon(refresh)
 
-    async def _command(self, send: Callable[[], Awaitable[dict]]) -> None:
-        """Serialize writes and invalidate stale observations after an attempt."""
-        async with self._command_lock:
-            accepted = False
-            try:
-                await send()
-                accepted = True
-            finally:
-                self._command_generation += 1
-                self.client.invalidate_properties()
-                if not accepted:
-                    self._schedule_refresh()
-
     async def async_update(self) -> None:
         """Handle the event when the device status changes."""
         _LOGGER.debug("Updating %s", self._attr_unique_id)
         self._poll_generation += 1
         generation = self._poll_generation
-        command_generation = self._command_generation
+        command_generation = self.client.humidifier_commands.generation
         try:
             values = _snapshot_values(await self.client.get_properties())
         except Exception as err:  # noqa: BLE001
-            if command_generation == self._command_generation:
+            if command_generation == self.client.humidifier_commands.generation:
                 self._poll_failed(generation, err, _LOGGER)
             return
         finally:
-            if command_generation != self._command_generation:
+            if command_generation != self.client.humidifier_commands.generation:
                 self._schedule_refresh()
-        if command_generation != self._command_generation:
+        if command_generation != self.client.humidifier_commands.generation:
             return
         if not self._accept_poll(generation):
             return
@@ -178,12 +165,16 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the entity on."""
         _LOGGER.debug("Turning on %s", self._attr_unique_id)
-        await self._command(lambda: self.client.set_status(Status.ON))
+        await self.client.humidifier_commands.run(
+            lambda: self.client.set_status(Status.ON)
+        )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the entity off."""
         _LOGGER.debug("Turning off %s", self._attr_unique_id)
-        await self._command(lambda: self.client.set_status(Status.OFF))
+        await self.client.humidifier_commands.run(
+            lambda: self.client.set_status(Status.OFF)
+        )
 
     async def async_set_mode(self, mode: str) -> None:
         """Set new target mode."""
@@ -191,9 +182,11 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         target = MODE_BY_NAME.get(mode)
         if target is None:
             raise ServiceValidationError(f"Unsupported dehumidifier mode: {mode!r}")
-        await self._command(lambda: self.client.set_mode(target))
+        await self.client.humidifier_commands.run(lambda: self.client.set_mode(target))
 
     async def async_set_humidity(self, humidity: int) -> None:
         """Set new target humidity."""
         _LOGGER.debug("Setting humidity %s mode to %s", self._attr_unique_id, humidity)
-        await self._command(lambda: self.client.set_humidity(humidity))
+        await self.client.humidifier_commands.run(
+            lambda: self.client.set_humidity(humidity)
+        )

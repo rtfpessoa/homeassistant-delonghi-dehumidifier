@@ -16,6 +16,7 @@ import aiohttp
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import REAL_FEEL_ACTIVATION_PAYLOAD
+from .humidifier_commands import HumidifierCommands
 
 # API Docs: https://docs.aylanetworks.com/reference
 
@@ -373,6 +374,7 @@ class APIClient:
         self.device_properties_timestamp = 0.0
         self.device_properties_request_started = None
         self.device_dsn = None
+        self.humidifier_commands = HumidifierCommands(self.invalidate_properties)
 
     async def authenticate(self) -> bool:
         """Authenticate with the DeLonghi service.
