@@ -1,6 +1,8 @@
 """Adds dehumidifer entity for each dehumidifer appliance."""
 
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Any
 
@@ -92,21 +94,59 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         self._attr_device_info = device_info
         self._poll_generation = 0
         self._completed_poll_generation = 0
+        self._command_lock = asyncio.Lock()
+        self._command_generation = 0
+        self._refresh_handle: asyncio.Handle | None = None
+        self._removed = False
         _LOGGER.debug("Initialized %s", self._attr_unique_id)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        self.async_on_remove(self._cancel_refresh)
         await self.async_update()
+
+    def _cancel_refresh(self) -> None:
+        """Do not schedule follow-up work after the entity is removed."""
+        self._removed = True
+        if self._refresh_handle is not None:
+            self._refresh_handle.cancel()
+            self._refresh_handle = None
+
+    def _schedule_refresh(self) -> None:
+        """Refresh after HA has released the currently staged update."""
+        if self._removed or self._refresh_handle is not None:
+            return
+
+        def refresh() -> None:
+            self._refresh_handle = None
+            if not self._removed:
+                self.async_schedule_update_ha_state(force_refresh=True)
+
+        self._refresh_handle = self.hass.loop.call_soon(refresh)
+
+    async def _command(self, send: Callable[[], Awaitable[dict]]) -> None:
+        """Serialize writes and request an observation only after acceptance."""
+        async with self._command_lock:
+            await send()
+            self._command_generation += 1
+            self.client.invalidate_properties()
 
     async def async_update(self) -> None:
         """Handle the event when the device status changes."""
         _LOGGER.debug("Updating %s", self._attr_unique_id)
         self._poll_generation += 1
         generation = self._poll_generation
+        command_generation = self._command_generation
         try:
             values = _snapshot_values(await self.client.get_properties())
         except Exception as err:  # noqa: BLE001
-            self._poll_failed(generation, err, _LOGGER)
+            if command_generation == self._command_generation:
+                self._poll_failed(generation, err, _LOGGER)
+            return
+        finally:
+            if command_generation != self._command_generation:
+                self._schedule_refresh()
+        if command_generation != self._command_generation:
             return
         if not self._accept_poll(generation):
             return
@@ -131,19 +171,19 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the entity on."""
         _LOGGER.debug("Turning on %s", self._attr_unique_id)
-        await self.client.set_status(Status.ON)
+        await self._command(lambda: self.client.set_status(Status.ON))
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the entity off."""
         _LOGGER.debug("Turning off %s", self._attr_unique_id)
-        await self.client.set_status(Status.OFF)
+        await self._command(lambda: self.client.set_status(Status.OFF))
 
     async def async_set_mode(self, mode: str) -> None:
         """Set new target mode."""
         _LOGGER.debug("Setting mode %s mode to %s", self._attr_unique_id, mode)
-        await self.client.set_mode(MODE_BY_NAME.get(mode))
+        await self._command(lambda: self.client.set_mode(MODE_BY_NAME.get(mode)))
 
     async def async_set_humidity(self, humidity: int) -> None:
         """Set new target humidity."""
         _LOGGER.debug("Setting humidity %s mode to %s", self._attr_unique_id, humidity)
-        await self.client.set_humidity(humidity)
+        await self._command(lambda: self.client.set_humidity(humidity))
