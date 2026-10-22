@@ -31,6 +31,8 @@ _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=1)
 _PENDING_SECONDS = 120
+_PENDING_REFRESH_INTERVAL = 15
+_PENDING_REFRESH_LIMIT = 4
 _ORDINARY_MODES = [Mode.DEHUMIDIFY.name, Mode.DRY_CLOTHES.name, Mode.PURIFIER.name]
 
 
@@ -132,6 +134,8 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         self._pending_earlier_modes: set[str] = set()
         self._pending_deadline: float | None = None
         self._pending_timer: asyncio.TimerHandle | None = None
+        self._pending_refresh_timer: asyncio.TimerHandle | None = None
+        self._pending_refresh_remaining = 0
         self._pending_generation = 0
         _LOGGER.debug("Initialized %s", self._attr_unique_id)
 
@@ -346,6 +350,10 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         if self._pending_timer is not None:
             self._pending_timer.cancel()
             self._pending_timer = None
+        if self._pending_refresh_timer is not None:
+            self._pending_refresh_timer.cancel()
+            self._pending_refresh_timer = None
+        self._pending_refresh_remaining = 0
         self._pending_mode = None
         self._pending_source = None
         self._pending_earlier_modes.clear()
@@ -372,13 +380,45 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         self._pending_timer = self.hass.loop.call_later(
             _PENDING_SECONDS, self._pending_expired, generation
         )
+        if (
+            self._pending_mode == Mode.REAL_FEEL.name
+            and not self.client.invalid_credentials
+        ):
+            self._pending_refresh_remaining = _PENDING_REFRESH_LIMIT
+            self._pending_refresh_timer = self.hass.loop.call_later(
+                _PENDING_REFRESH_INTERVAL, self._pending_refresh_tick, generation
+            )
         self._schedule_refresh()
+
+    def _pending_refresh_tick(self, generation: int) -> None:
+        """Request a bounded follow-up observation while activation is pending."""
+        if generation != self._pending_generation:
+            return
+        self._pending_refresh_timer = None
+        if (
+            self._removed
+            or self.client.invalid_credentials
+            or self._pending_mode != Mode.REAL_FEEL.name
+            or self._pending_deadline is None
+            or self.hass.loop.time() >= self._pending_deadline
+        ):
+            return
+        self._pending_refresh_remaining -= 1
+        self._schedule_refresh()
+        if self._pending_refresh_remaining:
+            self._pending_refresh_timer = self.hass.loop.call_later(
+                _PENDING_REFRESH_INTERVAL, self._pending_refresh_tick, generation
+            )
 
     def _pending_expired(self, generation: int) -> None:
         """After the bounded wait, request a new snapshot rather than use the cache."""
         if self._removed or generation != self._pending_generation:
             return
         self._pending_timer = None
+        if self._pending_refresh_timer is not None:
+            self._pending_refresh_timer.cancel()
+            self._pending_refresh_timer = None
+        self._pending_refresh_remaining = 0
         self._poll_generation += 1
         self._completed_poll_generation = self._poll_generation
         self.client.invalidate_properties()

@@ -8,6 +8,8 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_component import async_update_entity
 
+from custom_components.delonghi_dehumidifier_api import humidifier
+from custom_components.delonghi_dehumidifier_api.client import InvalidCredentialsError
 from custom_components.delonghi_dehumidifier_api.const import (
     DOMAIN,
     REAL_FEEL_ACTIVATION_PAYLOAD,
@@ -213,6 +215,329 @@ async def test_pending_suppresses_old_echo_and_blocks_wrong_followup(hass, cloud
     await set_mode(hass, "DEHUMIDIFY")
     assert cloud[4].await_count == 2
     assert cloud[4].await_args.kwargs == {"allow_redirects": False}
+
+
+@pytest.mark.parametrize(
+    ("cloud", "starting_mode"),
+    [
+        (
+            {"device_mode": 2, "activate_realfeel": REAL_FEEL_DEACTIVATION_PAYLOAD},
+            "DRY_CLOTHES",
+        ),
+        (
+            {"device_mode": 3, "activate_realfeel": REAL_FEEL_DEACTIVATION_PAYLOAD},
+            "PURIFIER",
+        ),
+    ],
+    indirect=["cloud"],
+)
+async def test_late_real_feel_cloud_confirmation_refreshes_without_poll(
+    hass, cloud, starting_mode
+):
+    """A delayed cloud confirmation updates the selector without another write."""
+    await setup(hass, cloud)
+    assert hass.states.get(humidifier_id(hass)).attributes["mode"] == starting_mode
+    with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05):
+        await set_mode(hass, "REAL_FEEL")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
+
+        # The initial post-command GET still showed the old mode.  Simulate the
+        # cloud catching up after the client's ten-second cache lifetime.
+        reads = cloud[3].await_count
+        cloud[1].update(device_mode=1, activate_realfeel=REAL_FEEL_ACTIVATION_PAYLOAD)
+        cloud[0].runtime_data.device_properties_timestamp -= 11
+        await asyncio.sleep(0.15)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "REAL_FEEL"
+        assert cloud[3].await_count > reads
+    cloud[4].assert_awaited_once_with(
+        "apiv1/dsns/test-dsn/properties/activate_realfeel/datapoints.json",
+        {"datapoint": {"value": REAL_FEEL_ACTIVATION_PAYLOAD}},
+        allow_redirects=False,
+    )
+
+
+async def test_pending_real_feel_refresh_stops_when_confirmed(hass, cloud):
+    await setup(hass, cloud)
+    cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05):
+        await set_mode(hass, "REAL_FEEL")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        cloud[1]["activate_realfeel"] = REAL_FEEL_ACTIVATION_PAYLOAD
+        await refresh(hass, cloud)
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "REAL_FEEL"
+        reads = cloud[3].await_count
+        cloud[0].runtime_data.device_properties_timestamp -= 11
+        await asyncio.sleep(0.15)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert cloud[3].await_count == reads
+    cloud[4].assert_awaited_once()
+
+
+@pytest.mark.parametrize("cloud", [{"device_mode": 2}], indirect=True)
+async def test_pending_refresh_stops_when_distinct_external_mode_arrives(hass, cloud):
+    await setup(hass, cloud)
+    with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05):
+        await set_mode(hass, "REAL_FEEL")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        cloud[1]["device_mode"] = 3
+        await refresh(hass, cloud)
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "PURIFIER"
+        reads = cloud[3].await_count
+        cloud[0].runtime_data.device_properties_timestamp -= 11
+        await asyncio.sleep(0.15)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert cloud[3].await_count == reads
+    cloud[4].assert_awaited_once()
+
+
+async def test_pending_refresh_is_bounded_and_reuses_cache(hass, cloud):
+    await setup(hass, cloud)
+    cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    client = cloud[0].runtime_data
+    with (
+        patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.03),
+        patch.object(
+            client, "get_properties", wraps=client.get_properties
+        ) as properties,
+    ):
+        await set_mode(hass, "REAL_FEEL")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        reads = cloud[3].await_count
+        observations = properties.await_count
+        await asyncio.sleep(0.2)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert properties.await_count - observations == 4
+        assert cloud[3].await_count == reads  # The ten-second cache remains valid.
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
+        entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
+        assert entity._pending_refresh_timer is None
+    cloud[4].assert_awaited_once()
+
+
+async def test_pending_refresh_stops_after_authentication_rejection(hass, cloud):
+    await setup(hass, cloud)
+    cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    client = cloud[0].runtime_data
+    with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05):
+        await set_mode(hass, "REAL_FEEL")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        reads = cloud[3].await_count
+        with (
+            patch.object(
+                client,
+                "get_new_access_token",
+                side_effect=InvalidCredentialsError("rejected"),
+            ),
+            pytest.raises(InvalidCredentialsError),
+        ):
+            await client._fetch_access_token()
+        await asyncio.sleep(0.15)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert client.invalid_credentials
+        assert cloud[3].await_count == reads
+        entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
+        assert entity._pending_refresh_timer is None
+    cloud[4].assert_awaited_once()
+
+
+async def test_pending_refresh_timer_is_cancelled_on_unload(hass, cloud):
+    await setup(hass, cloud)
+    cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05):
+        await set_mode(hass, "REAL_FEEL")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
+        timer = entity._pending_refresh_timer
+        reads = cloud[3].await_count
+        assert timer is not None
+        assert await hass.config_entries.async_unload(cloud[0].entry_id)
+        assert timer.cancelled()
+        await asyncio.sleep(0.15)
+        assert cloud[3].await_count == reads
+    cloud[4].assert_awaited_once()
+
+
+async def test_pending_refresh_timer_is_cancelled_on_expiry(hass, cloud):
+    await setup(hass, cloud)
+    cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05):
+        await set_mode(hass, "REAL_FEEL")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
+        timer = entity._pending_refresh_timer
+        assert timer is not None
+        entity._pending_deadline = hass.loop.time() - 1
+        entity._pending_timer.cancel()
+        entity._pending_expired(entity._pending_generation)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert timer.cancelled()
+        reads = cloud[3].await_count
+        cloud[0].runtime_data.device_properties_timestamp -= 11
+        await asyncio.sleep(0.15)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert cloud[3].await_count == reads
+    cloud[4].assert_awaited_once()
+
+
+@pytest.mark.parametrize("failure", ["timeout", "cancel"])
+async def test_ambiguous_write_still_refreshes_without_retry(hass, cloud, failure):
+    await setup(hass, cloud)
+    cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    started = asyncio.Event()
+
+    async def send(*args, **kwargs):
+        started.set()
+        if failure == "timeout":
+            raise TimeoutError("lost response")
+        await asyncio.Event().wait()
+
+    cloud[4].side_effect = send
+    with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05):
+        task = asyncio.create_task(set_mode(hass, "REAL_FEEL"))
+        await asyncio.wait_for(started.wait(), 3)
+        if failure == "cancel":
+            task.cancel()
+        with pytest.raises(
+            HomeAssistantError if failure == "timeout" else asyncio.CancelledError
+        ):
+            await task
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] is None
+        reads = cloud[3].await_count
+        cloud[1]["activate_realfeel"] = REAL_FEEL_ACTIVATION_PAYLOAD
+        cloud[0].runtime_data.device_properties_timestamp -= 11
+        await asyncio.sleep(0.15)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert cloud[3].await_count > reads
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "REAL_FEEL"
+    cloud[4].assert_awaited_once()
+
+
+async def test_old_refresh_callback_cannot_cancel_new_request_timer(hass, cloud):
+    await setup(hass, cloud)
+    cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05):
+        await set_mode(hass, "REAL_FEEL")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
+        old_generation = entity._pending_generation
+        old_timer = entity._pending_refresh_timer
+        await set_mode(hass, "REAL_FEEL")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        new_timer = entity._pending_refresh_timer
+        assert old_timer is not None and old_timer.cancelled()
+        assert new_timer is not None and new_timer is not old_timer
+        entity._pending_refresh_tick(old_generation)
+        assert entity._pending_refresh_timer is new_timer
+        cloud[1]["activate_realfeel"] = REAL_FEEL_ACTIVATION_PAYLOAD
+        cloud[0].runtime_data.device_properties_timestamp -= 11
+        await asyncio.sleep(0.15)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "REAL_FEEL"
+    assert cloud[4].await_count == 2  # One for each explicit user action.
+
+
+@pytest.mark.parametrize(
+    ("cloud", "target"),
+    [({}, "DRY_CLOTHES"), ({"firmware_version": "other"}, "REAL_FEEL")],
+    indirect=["cloud"],
+)
+async def test_other_mode_or_device_does_not_schedule_extra_refreshes(
+    hass, cloud, target
+):
+    await setup(hass, cloud)
+    client = cloud[0].runtime_data
+    with (
+        patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05),
+        patch.object(
+            client, "get_properties", wraps=client.get_properties
+        ) as properties,
+    ):
+        await set_mode(hass, target)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        observations = properties.await_count
+        await asyncio.sleep(0.15)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert properties.await_count == observations
+    cloud[4].assert_awaited_once()
+
+
+async def test_pending_refresh_does_not_overlap_a_slow_get(hass, cloud):
+    await setup(hass, cloud)
+    cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def slow_read(_path):
+        started.set()
+        await release.wait()
+        return cloud[2]()
+
+    with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.03):
+        await set_mode(hass, "REAL_FEEL")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        cloud[3].side_effect = slow_read
+        reads = cloud[3].await_count
+        cloud[0].runtime_data.device_properties_timestamp -= 11
+        try:
+            await asyncio.wait_for(started.wait(), 3)
+            await asyncio.sleep(0.2)
+            assert cloud[3].await_count == reads + 1
+            cloud[4].assert_awaited_once()
+            cloud[1]["activate_realfeel"] = REAL_FEEL_ACTIVATION_PAYLOAD
+        finally:
+            release.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "REAL_FEEL"
+    cloud[4].assert_awaited_once()
+
+
+async def test_superseded_inflight_refresh_cannot_restore_old_mode(hass, cloud):
+    await setup(hass, cloud)
+    cloud[1]["activate_realfeel"] = REAL_FEEL_DEACTIVATION_PAYLOAD
+    await refresh(hass, cloud)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    with patch.object(humidifier, "_PENDING_REFRESH_INTERVAL", 0.05):
+        await set_mode(hass, "REAL_FEEL")
+        await hass.async_block_till_done(wait_background_tasks=True)
+        old_snapshot = cloud[2]()
+        reads = 0
+
+        async def read(_path):
+            nonlocal reads
+            reads += 1
+            if reads == 1:
+                started.set()
+                await release.wait()
+                return old_snapshot
+            return cloud[2]()
+
+        cloud[3].side_effect = read
+        cloud[0].runtime_data.device_properties_timestamp -= 11
+        try:
+            await asyncio.wait_for(started.wait(), 3)
+            await set_mode(hass, "DRY_CLOTHES")
+            cloud[1]["device_mode"] = 2
+        finally:
+            release.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "DRY_CLOTHES"
+        read_count = cloud[3].await_count
+        cloud[0].runtime_data.device_properties_timestamp -= 11
+        await asyncio.sleep(0.15)
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert cloud[3].await_count == read_count
+    assert cloud[4].await_count == 2
 
 
 @pytest.mark.parametrize("failure", ["timeout", "cancel"])
