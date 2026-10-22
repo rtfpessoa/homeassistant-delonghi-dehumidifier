@@ -10,6 +10,7 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
 )
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
@@ -60,11 +61,16 @@ async def test_setup_and_unload_device(hass):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         assert entry.state is ConfigEntryState.LOADED
+        mode_entity_id = er.async_get(hass).async_get_entity_id(
+            "sensor", DOMAIN, f"{DOMAIN}_TEST-DSN_device_mode_sensor"
+        )
+        assert mode_entity_id == "sensor.test_dehumidifier_cloud_mode_raw"
         expected_states = {
             "humidifier.test_dehumidifier_unit": "on",
             "sensor.test_dehumidifier_current_humidity": "54",
             "switch.test_dehumidifier_eco_mode": "on",
             "switch.test_dehumidifier_swing_mode": "off",
+            mode_entity_id: "DEHUMIDIFY",
         }
         entity_ids = set(expected_states) | {
             "sensor.test_dehumidifier_target_humidity",
@@ -72,7 +78,6 @@ async def test_setup_and_unload_device(hass):
             "sensor.test_dehumidifier_filter_status",
             "sensor.test_dehumidifier_room_temperature",
             "sensor.test_dehumidifier_heat_exchanger_temperature",
-            "sensor.test_dehumidifier_device_mode",
             "sensor.test_dehumidifier_device_status",
             "sensor.test_dehumidifier_eco_mode",
             "sensor.test_dehumidifier_swing_mode",

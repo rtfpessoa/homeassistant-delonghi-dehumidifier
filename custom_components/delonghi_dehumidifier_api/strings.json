@@ -79,7 +79,7 @@
         "name": "Heat Exchanger Temperature"
       },
       "device_mode": {
-        "name": "Device Mode"
+        "name": "Cloud mode (raw)"
       },
       "device_status": {
         "name": "Device Status"
