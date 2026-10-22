@@ -74,7 +74,7 @@ async def test_setup_and_unload_device(hass):
         }
         entity_ids = set(expected_states) | {
             "sensor.test_dehumidifier_target_humidity",
-            "sensor.test_dehumidifier_current_speed",
+            "sensor.test_dehumidifier_current_speed_raw",
             "sensor.test_dehumidifier_filter_status",
             "sensor.test_dehumidifier_room_temperature",
             "sensor.test_dehumidifier_heat_exchanger_temperature",

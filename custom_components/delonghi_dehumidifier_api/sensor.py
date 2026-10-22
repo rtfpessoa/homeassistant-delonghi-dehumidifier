@@ -18,7 +18,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     EntityCategory,
-    UnitOfSpeed,
     UnitOfTemperature,
     UnitOfTime,
 )
@@ -91,11 +90,10 @@ async def async_setup_entry(
                 device_dsn,
                 device_info,
                 client,
-                "Current Speed",
+                "Current Speed Raw",
                 client.get_current_speed,
-                SensorDeviceClass.SPEED,
+                None,
                 state_class=SensorStateClass.MEASUREMENT,
-                unit_of_measurement=UnitOfSpeed.METERS_PER_SECOND,
             ),
             GenericSensor(
                 device_dsn,
@@ -211,7 +209,7 @@ class GenericSensor(AuthAvailabilityEntity, SensorEntity):
         client: APIClient,
         type_name: str,
         get_value: Callable[[], Coroutine[Any, Any, Any]],
-        device_class: SensorDeviceClass,
+        device_class: SensorDeviceClass | None,
         state_class: SensorStateClass | None = None,
         unit_of_measurement: str | None = None,
         options: list[str] | None = None,
