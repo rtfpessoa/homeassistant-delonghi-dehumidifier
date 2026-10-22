@@ -1,7 +1,7 @@
 {
   "domain": "delonghi_dehumidifier_api",
   "name": "DeLonghi Dehumidifier (API)",
-  "after_dependencies": ["network", "logger"],
+  "after_dependencies": ["network", "logger", "logbook"],
   "codeowners": ["@rtfpessoa"],
   "config_flow": true,
   "documentation": "https://github.com/rtfpessoa/homeassistant-delonghi-dehumidifier/blob/main/README.md",
