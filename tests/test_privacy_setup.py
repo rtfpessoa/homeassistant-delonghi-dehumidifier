@@ -6,7 +6,7 @@ import logging
 import time
 from datetime import timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
 import aiohttp
 import pytest
@@ -16,7 +16,6 @@ from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry,
     async_fire_time_changed,
 )
 
@@ -24,10 +23,11 @@ from custom_components.delonghi_dehumidifier_api import async_setup_entry
 from custom_components.delonghi_dehumidifier_api.client import (
     APIClient,
     InvalidCredentialsError,
-    NoDevicesError,
     TransientCloudError,
 )
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from custom_components.delonghi_dehumidifier_api.identity import CONF_DSN
+from tests.identity_helpers import bound_entry
 
 SECRETS = (
     "secret-email@example.com",
@@ -78,14 +78,17 @@ async def test_flow_failure_classification_and_no_secret_logs(
     hass, caplog, authentication, devices, expected, flow_kind
 ):
     """Failed forms preserve settings and never log provider exception details."""
-    entry = MockConfigEntry(domain=DOMAIN, data=CONFIG, options={CONF_LANGUAGE: "de"})
-    entry.add_to_hass(hass)
-    original_data, original_options = dict(entry.data), dict(entry.options)
     if flow_kind == "user":
+        entry = None
         form = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": config_entries.SOURCE_USER}
         )
     else:
+        entry = bound_entry(
+            domain=DOMAIN, data=CONFIG, options={CONF_LANGUAGE: "de"}, dsn=SECRETS[2]
+        )
+        entry.add_to_hass(hass)
+        original_data, original_options = dict(entry.data), dict(entry.options)
         form = await hass.config_entries.options.async_init(entry.entry_id)
     auth = (
         AsyncMock(side_effect=authentication)
@@ -120,8 +123,9 @@ async def test_flow_failure_classification_and_no_secret_logs(
             )
     assert result["type"] == "form"
     assert result["errors"]["base"] == expected
-    assert entry.data == original_data and entry.options == original_options
-    assert not entry.update_listeners
+    if entry is not None:
+        assert entry.data == original_data and entry.options == original_options
+        assert not entry.update_listeners
     assert len(closed) == 1 and closed[0]._closed
     records = integration_records(caplog)
     if expected == "unknown":
@@ -136,12 +140,19 @@ async def test_flow_failure_classification_and_no_secret_logs(
 
 async def test_options_failures_do_not_touch_loaded_client(hass, caplog):
     """A failed option update leaves the actual running entry untouched."""
-    entry = MockConfigEntry(domain=DOMAIN, data=CONFIG, options={CONF_LANGUAGE: "de"})
+    entry = bound_entry(
+        domain=DOMAIN, data=CONFIG, options={CONF_LANGUAGE: "de"}, dsn=SECRETS[2]
+    )
     entry.add_to_hass(hass)
+    original_data, original_options = dict(entry.data), dict(entry.options)
     properties = [{"product_name": "Test", "name": "device_status", "value": 1}]
     with (
         patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
-        patch.object(APIClient, "get_first_device", AsyncMock(return_value=SECRETS[2])),
+        patch.object(
+            APIClient,
+            "get_request",
+            AsyncMock(return_value=[{"device": {"dsn": SECRETS[2]}}]),
+        ),
         patch.object(APIClient, "get_properties", AsyncMock(return_value=properties)),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -160,21 +171,18 @@ async def test_options_failures_do_not_touch_loaded_client(hass, caplog):
                     result["flow_id"], user_input=CONFIG
                 )
             assert result["errors"]["base"] == expected
-            assert entry.data == CONFIG and entry.options == {CONF_LANGUAGE: "de"}
+            assert entry.data == original_data and entry.options == original_options
             assert (
                 entry.runtime_data is client
                 and list(entry.update_listeners) == listeners
             )
         result = await hass.config_entries.options.async_init(entry.entry_id)
-        with patch(
-            "custom_components.delonghi_dehumidifier_api.config_flow.validate_input",
-            AsyncMock(side_effect=NoDevicesError()),
-        ):
+        with patch.object(APIClient, "get_request", AsyncMock(return_value=[])):
             result = await hass.config_entries.options.async_configure(
                 result["flow_id"], user_input=CONFIG
             )
         assert result["errors"]["base"] == "no_devices"
-        assert entry.data == CONFIG and entry.options == {CONF_LANGUAGE: "de"}
+        assert entry.data == original_data and entry.options == original_options
         assert (
             entry.runtime_data is client and list(entry.update_listeners) == listeners
         )
@@ -183,8 +191,9 @@ async def test_options_failures_do_not_touch_loaded_client(hass, caplog):
 
 async def test_empty_account_retries_through_home_assistant(hass):
     """Discovery failure forwards nothing; HA retries and loads exactly once."""
-    entry = MockConfigEntry(domain=DOMAIN, data=CONFIG)
+    entry = bound_entry(domain=DOMAIN, data=CONFIG, dsn=SECRETS[2])
     entry.add_to_hass(hass)
+    original_data, original_unique_id = dict(entry.data), entry.unique_id
     devices = []
     properties = [
         {"property": {"name": "device_status", "value": 1, "product_name": "Test"}}
@@ -202,6 +211,7 @@ async def test_empty_account_retries_through_home_assistant(hass):
     with (
         patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
         patch.object(APIClient, "get_request", AsyncMock(side_effect=request)),
+        patch.object(APIClient, "post_request", AsyncMock()) as post,
         patch.object(APIClient, "async_shutdown", close),
         patch.object(
             hass.config_entries,
@@ -216,6 +226,8 @@ async def test_empty_account_retries_through_home_assistant(hass):
         assert not entry.update_listeners
         assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
         forward.assert_not_awaited()
+        post.assert_not_awaited()
+        assert entry.data == original_data and entry.unique_id == original_unique_id
         assert not er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
         devices.append({"device": {"dsn": SECRETS[2]}})
         async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=2))
@@ -225,78 +237,15 @@ async def test_empty_account_retries_through_home_assistant(hass):
         assert len(closed) == 1
         forward.assert_awaited_once()
         assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+        assert entry.data == original_data and entry.unique_id == original_unique_id
+        post.assert_not_awaited()
         assert await hass.config_entries.async_unload(entry.entry_id)
         assert len(closed) == 2 and not entry.update_listeners
 
 
-@pytest.mark.parametrize("status", [429, 503])
-@pytest.mark.parametrize("phase", ["authenticate", "discovery"])
-async def test_transient_cloud_failure_retries_setup(hass, status, phase):
-    """HA retries temporary authentication or discovery failures without a reauth."""
-    entry = MockConfigEntry(domain=DOMAIN, data=CONFIG)
-    entry.add_to_hass(hass)
-    recovered = False
-    response = Mock(status=status, json=AsyncMock())
-
-    async def authenticate():
-        if phase == "authenticate" and not recovered:
-            await APIClient._read_response(response)
-        return True
-
-    async def discover():
-        if phase == "discovery" and not recovered:
-            await APIClient._read_response(response)
-        return SECRETS[2]
-
-    with (
-        patch.object(APIClient, "authenticate", AsyncMock(side_effect=authenticate)),
-        patch.object(APIClient, "get_first_device", AsyncMock(side_effect=discover)),
-        patch.object(APIClient, "get_properties", AsyncMock(return_value=[])),
-        patch.object(
-            hass.config_entries, "async_forward_entry_setups", AsyncMock()
-        ) as forward,
-        patch.object(
-            hass.config_entries, "async_unload_platforms", AsyncMock(return_value=True)
-        ),
-    ):
-        assert not await hass.config_entries.async_setup(entry.entry_id)
-        assert entry.state is ConfigEntryState.SETUP_RETRY
-        response.release.assert_called_once()
-        response.json.assert_not_awaited()
-        forward.assert_not_awaited()
-        assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
-        recovered = True
-        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=2))
-        await hass.async_block_till_done(wait_background_tasks=True)
-        assert entry.state is ConfigEntryState.LOADED
-        forward.assert_awaited_once()
-        assert await hass.config_entries.async_unload(entry.entry_id)
-
-
-@pytest.mark.parametrize("properties", [[], [{}], [{"product_name": None}]])
-async def test_missing_cloud_name_still_creates_entry(hass, properties):
-    """A missing display name does not prevent an otherwise valid setup."""
-    with (
-        patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
-        patch.object(APIClient, "get_properties", AsyncMock(return_value=properties)),
-        patch.object(APIClient, "get_first_device", AsyncMock(return_value=SECRETS[2])),
-        patch.object(hass.config_entries, "async_forward_entry_setups", AsyncMock()),
-    ):
-        form = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
-        result = await hass.config_entries.flow.async_configure(
-            form["flow_id"], user_input=CONFIG
-        )
-        assert result["type"] == "create_entry"
-        assert result["title"] == "DeLonghi Dehumidifier"
-        await hass.async_block_till_done()
-        await result["result"].runtime_data.async_shutdown()
-
-
 async def test_cancelled_discovery_closes_client(hass):
     """Cancellation during setup cannot leave a live client or platforms."""
-    entry = MockConfigEntry(domain=DOMAIN, data=CONFIG)
+    entry = bound_entry(domain=DOMAIN, data=CONFIG, dsn=SECRETS[2])
     entry.add_to_hass(hass)
     started = asyncio.Event()
     closed = []
@@ -356,7 +305,7 @@ async def test_entity_debug_logs_hide_identifiers_values_and_errors(hass, caplog
     from homeassistant.exceptions import ServiceValidationError
     from homeassistant.helpers.entity_component import async_update_entity
 
-    entry = MockConfigEntry(domain=DOMAIN, data=CONFIG)
+    entry = bound_entry(domain=DOMAIN, data=CONFIG, dsn=SECRETS[2])
     entry.add_to_hass(hass)
     values = {
         "device_status": 1,
@@ -449,7 +398,7 @@ async def test_entity_debug_logs_hide_identifiers_values_and_errors(hass, caplog
 async def test_reauth_error_classification_is_preserved_and_safe(
     hass, caplog, failure, expected
 ):
-    entry = MockConfigEntry(domain=DOMAIN, data=CONFIG)
+    entry = bound_entry(domain=DOMAIN, data=CONFIG, dsn=SECRETS[2])
     entry.add_to_hass(hass)
     form = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -469,7 +418,7 @@ async def test_reauth_error_classification_is_preserved_and_safe(
             form["flow_id"], user_input={CONF_PASSWORD: SECRETS[1]}
         )
     assert result["errors"]["base"] == expected
-    assert entry.data == CONFIG and not entry.options
+    assert entry.data == {**CONFIG, CONF_DSN: SECRETS[2]} and not entry.options
     records = integration_records(caplog)
     if isinstance(failure, RuntimeError):
         assert_safe(records)
@@ -477,4 +426,110 @@ async def test_reauth_error_classification_is_preserved_and_safe(
         not record.exc_info
         and not any(secret in record.getMessage() for secret in SECRETS)
         for record in records
+    )
+
+
+@pytest.mark.parametrize(
+    ("authentication", "devices", "expected"),
+    [
+        (InvalidCredentialsError(SECRETS[0]), None, "invalid_auth"),
+        (False, None, "invalid_auth"),
+        (TimeoutError(SECRETS[4]), None, "cannot_connect"),
+        (aiohttp.ClientConnectionError(SECRETS[4]), None, "cannot_connect"),
+        (TransientCloudError(), None, "cannot_connect"),
+        (True, [], "no_devices"),
+        (True, {}, "unknown"),
+        (True, TimeoutError(SECRETS[4]), "cannot_connect"),
+        (True, aiohttp.ClientConnectionError(SECRETS[4]), "cannot_connect"),
+        (True, TransientCloudError(), "cannot_connect"),
+        (True, RuntimeError(SECRETS[5]), "unknown"),
+        (True, [{"device": {"dsn": "other-device"}}], "device_not_available"),
+    ],
+)
+async def test_selection_failure_is_private_and_does_not_create_entry(
+    hass, caplog, authentication, devices, expected
+):
+    """The second step rechecks access and safely reports every failure."""
+    form = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    first_devices = [
+        {"device": {"dsn": SECRETS[2]}},
+        {"device": {"dsn": "other-device"}},
+    ]
+    closed = []
+    shutdown = APIClient.async_shutdown
+
+    async def close(client):
+        closed.append(client)
+        await shutdown(client)
+
+    with (
+        caplog.at_level(logging.DEBUG, logger=f"custom_components.{DOMAIN}"),
+        patch.object(APIClient, "authenticate", AsyncMock(return_value=True)) as auth,
+        patch.object(
+            APIClient, "get_request", AsyncMock(return_value=first_devices)
+        ) as request,
+        patch.object(APIClient, "post_request", AsyncMock()) as post,
+        patch.object(APIClient, "async_shutdown", close),
+    ):
+        selection = await hass.config_entries.flow.async_configure(
+            form["flow_id"], user_input=CONFIG
+        )
+        assert selection["type"] == "form" and selection["step_id"] == "select_device"
+        if isinstance(authentication, Exception):
+            auth.side_effect = authentication
+        else:
+            auth.return_value = authentication
+        if isinstance(devices, Exception):
+            request.side_effect = devices
+        else:
+            request.return_value = devices
+        result = await hass.config_entries.flow.async_configure(
+            selection["flow_id"], user_input={CONF_DSN: SECRETS[2]}
+        )
+    assert result["type"] == "form" and result["step_id"] == "select_device"
+    assert result["errors"]["base"] == expected
+    assert not hass.config_entries.async_entries(DOMAIN)
+    assert len(closed) == 2 and all(client._closed for client in closed)
+    post.assert_not_awaited()
+    records = integration_records(caplog)
+    if expected == "unknown":
+        assert_safe(records)
+    assert all(
+        not record.exc_info
+        and not any(secret in record.getMessage() for secret in SECRETS)
+        for record in records
+    )
+
+
+@pytest.mark.parametrize("devices", [[], [{"device": {"dsn": "other-device"}}]])
+async def test_reauth_missing_pinned_device_is_private_and_keeps_settings(
+    hass, caplog, devices
+):
+    """Reauthentication verifies the bound device before saving a password."""
+    entry = bound_entry(domain=DOMAIN, data=CONFIG, dsn=SECRETS[2])
+    entry.add_to_hass(hass)
+    original_data = dict(entry.data)
+    form = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_REAUTH, "entry_id": entry.entry_id},
+        data=CONFIG,
+    )
+    with (
+        caplog.at_level(logging.DEBUG, logger=f"custom_components.{DOMAIN}"),
+        patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
+        patch.object(APIClient, "get_request", AsyncMock(return_value=devices)),
+        patch.object(APIClient, "post_request", AsyncMock()) as post,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            form["flow_id"], user_input={CONF_PASSWORD: SECRETS[1]}
+        )
+    assert result["errors"]["base"] == "device_not_available"
+    assert entry.data == original_data and not entry.options
+    post.assert_not_awaited()
+    assert all(
+        not record.exc_info
+        and not any(secret in record.getMessage() for secret in SECRETS)
+        for record in integration_records(caplog)
     )

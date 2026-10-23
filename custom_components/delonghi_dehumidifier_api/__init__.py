@@ -12,11 +12,31 @@ from homeassistant.helpers import entity_registry as er
 
 from .client import (
     APIClient,
+    DeviceNotAvailableError,
     InvalidCredentialsError,
+    InvalidDeviceListError,
     NoDevicesError,
     TransientCloudError,
+    usable_dsn,
 )
 from .const import DOMAIN, RUNTIME_REAUTH_ID
+from .identity import (
+    CONF_DSN,
+    CONF_ENROLLMENT,
+    CONF_TRANSFER,
+    ClaimJournalError,
+    active_commands,
+    binding_lock,
+    claimants,
+    clear_binding_issue,
+    command_guard,
+    create_binding_issue,
+    device_unique_id,
+    discard_enrollment,
+    has_enrollment,
+    reload_journal,
+    save_election,
+)
 
 _PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -28,10 +48,54 @@ _PLATFORMS: list[Platform] = [
 type DeLonghiDehumidifierConfigEntry = ConfigEntry[APIClient]
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Upgrade the schema offline; device binding happens during setup."""
+    if entry.version == 1:
+        hass.config_entries.async_update_entry(entry, version=2, minor_version=1)
+    return entry.version == 2
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: DeLonghiDehumidifierConfigEntry
 ) -> bool:
     """Set up DeLonghi Dehumidifier from a config entry."""
+
+    original_data, original_options = dict(entry.data), dict(entry.options)
+    async with binding_lock(hass):
+        try:
+            journal = await reload_journal(hass)
+        except ClaimJournalError as err:
+            create_binding_issue(hass, entry)
+            raise ConfigEntryNotReady("Device ownership needs recovery") from err
+        dsn = entry.data.get(CONF_DSN)
+        if dsn is None:
+            create_binding_issue(hass, entry)
+            raise ConfigEntryNotReady("Device identity needs confirmation")
+        elif (
+            not usable_dsn(dsn)
+            or entry.unique_id != device_unique_id(dsn)
+            or any(owner is not entry for owner in claimants(hass, dsn))
+        ):
+            create_binding_issue(hass, entry)
+            raise ConfigEntryNotReady("Device identity needs recovery")
+        election = journal.get(device_unique_id(dsn))
+        transfer = bool(entry.data.get(CONF_TRANSFER))
+        token = entry.data.get(CONF_ENROLLMENT)
+        enrolling = has_enrollment(hass, token, dsn)
+        if (
+            election is None
+            and not enrolling
+            or election is not None
+            and election["owner"] != entry.entry_id
+            and not (
+                enrolling
+                and transfer
+                and hass.config_entries.async_get_entry(election["owner"]) is None
+                and not active_commands(hass, election["owner"])
+            )
+        ):
+            create_binding_issue(hass, entry)
+            raise ConfigEntryNotReady("Device identity needs recovery")
 
     settings = {**entry.data, **entry.options}
     language = settings[CONF_LANGUAGE]
@@ -43,24 +107,65 @@ async def async_setup_entry(
     setup_complete = False
     try:
         try:
-            authenticated = await client.authenticate()
-            if not authenticated:
+            if not await client.authenticate():
                 raise ConfigEntryNotReady("Unable to authenticate with DeLonghi")
-            await client.get_first_device()
+            await client.verify_device(dsn)
+            async with binding_lock(hass):
+                current_journal = await reload_journal(hass)
+                if (
+                    hass.config_entries.async_get_entry(entry.entry_id) is not entry
+                    or entry.data != original_data
+                    or entry.options != original_options
+                    or any(owner is not entry for owner in claimants(hass, dsn))
+                    or current_journal.get(device_unique_id(dsn)) != election
+                ):
+                    create_binding_issue(hass, entry)
+                    raise ConfigEntryNotReady("Device identity needs recovery")
+                if election is None or election["owner"] != entry.entry_id:
+                    if not enrolling or (
+                        election and active_commands(hass, election["owner"])
+                    ):
+                        create_binding_issue(hass, entry)
+                        raise ConfigEntryNotReady("Device ownership needs recovery")
+                    await save_election(hass, dsn, entry.entry_id, set())
+                    if (
+                        hass.config_entries.async_get_entry(entry.entry_id) is not entry
+                        or entry.data != original_data
+                        or entry.options != original_options
+                        or any(owner is not entry for owner in claimants(hass, dsn))
+                    ):
+                        create_binding_issue(hass, entry)
+                        raise ConfigEntryNotReady("Device identity needs recovery")
+                if transfer or token:
+                    data = dict(entry.data)
+                    data.pop(CONF_TRANSFER, None)
+                    data.pop(CONF_ENROLLMENT, None)
+                    hass.config_entries.async_update_entry(entry, data=data)
+                    discard_enrollment(hass, token)
+                clear_binding_issue(hass, entry)
             # Platforms need these properties to construct device information. Read
             # them while setup can still request a retry, before adding any entities.
             # Their subsequent reads share the client's normal property cache.
             await client.get_properties()
         except InvalidCredentialsError as err:
             raise ConfigEntryAuthFailed from err
+        except DeviceNotAvailableError as err:
+            create_binding_issue(hass, entry)
+            raise ConfigEntryNotReady("Selected device is not available") from err
+        except ClaimJournalError as err:
+            create_binding_issue(hass, entry)
+            raise ConfigEntryNotReady("Device ownership needs recovery") from err
         except NoDevicesError as err:
             raise ConfigEntryNotReady(
                 "No devices found in the DeLonghi account"
             ) from err
         except (aiohttp.ClientError, TimeoutError, TransientCloudError) as err:
             raise ConfigEntryNotReady("Unable to contact DeLonghi") from err
+        except InvalidDeviceListError as err:
+            raise ConfigEntryNotReady("Unable to discover DeLonghi devices") from err
 
         entry.runtime_data = client
+        client.device_write_guard = lambda: command_guard(hass, entry, dsn, client)
 
         def start_reauth() -> None:
             """Request reauthentication only for the active runtime client."""

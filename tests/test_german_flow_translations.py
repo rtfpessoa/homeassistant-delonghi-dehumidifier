@@ -13,8 +13,8 @@ from homeassistant.helpers.translation import async_get_translations, recursive_
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import InvalidCredentialsError
-from custom_components.delonghi_dehumidifier_api.config_flow import InvalidAuth
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from tests.identity_helpers import bound_entry
 
 CONFIG = {
     CONF_LANGUAGE: "pt",
@@ -54,7 +54,7 @@ async def test_german_flow_error_keeps_account_language(hass, flow_type):
         )
         manager = hass.config_entries.flow
     else:
-        entry = MockConfigEntry(domain=DOMAIN, data=CONFIG)
+        entry = bound_entry(domain=DOMAIN, data=CONFIG)
         entry.add_to_hass(hass)
         result = await hass.config_entries.options.async_init(entry.entry_id)
         manager = hass.config_entries.options
@@ -64,11 +64,12 @@ async def test_german_flow_error_keeps_account_language(hass, flow_type):
         "E-Mail-Adresse"
     )
     with patch(
-        "custom_components.delonghi_dehumidifier_api.config_flow.validate_input",
-        AsyncMock(side_effect=InvalidAuth()),
+        "custom_components.delonghi_dehumidifier_api.config_flow.APIClient.authenticate",
+        autospec=True,
+        side_effect=InvalidCredentialsError(),
     ) as validate:
         result = await manager.async_configure(result["flow_id"], user_input=CONFIG)
-    assert validate.await_args.args[1][CONF_LANGUAGE] == "pt"
+    assert validate.await_args.args[0].language == "pt"
     assert result["errors"]["base"] == "invalid_auth"
     assert german[f"{PREFIX}.{flow_type}.error.invalid_auth"] == (
         "Die Anmeldung ist fehlgeschlagen. Prüfe deine E-Mail-Adresse und dein "
@@ -99,6 +100,7 @@ async def test_german_reauth_uses_effective_email_and_account_language(hass):
         client.return_value.authenticate = AsyncMock(
             side_effect=InvalidCredentialsError("invalid credentials")
         )
+        client.return_value.async_shutdown = AsyncMock()
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], user_input={CONF_PASSWORD: "new-password"}
         )

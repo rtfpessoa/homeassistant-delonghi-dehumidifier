@@ -32,6 +32,11 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.delonghi_dehumidifier_api import sensor
 from custom_components.delonghi_dehumidifier_api.client import APIClient
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from custom_components.delonghi_dehumidifier_api.identity import (
+    CONF_DSN,
+    device_unique_id,
+)
+from tests.identity_helpers import bound_entry
 
 
 @pytest.fixture(autouse=True)
@@ -135,9 +140,8 @@ async def test_upgrade_preserves_old_statistics_and_settings(
             for name, value in values.items()
         ]
 
-    entry = MockConfigEntry(
+    entry = bound_entry(
         domain=DOMAIN,
-        version=1,
         data={
             CONF_EMAIL: "a@example.invalid",
             CONF_PASSWORD: "pass",
@@ -156,7 +160,7 @@ async def test_upgrade_preserves_old_statistics_and_settings(
 
     with (
         patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
-        patch.object(APIClient, "get_first_device", AsyncMock(return_value="test-dsn")),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["test-dsn"])),
         patch.object(APIClient, "get_request", AsyncMock(side_effect=get_properties)),
     ):
         with patch.object(sensor, "GenericSensor", legacy_sensor):
@@ -296,7 +300,7 @@ async def test_restart_retains_registry_and_statistics(
 
     with (
         patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
-        patch.object(APIClient, "get_first_device", AsyncMock(return_value="test-dsn")),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["test-dsn"])),
         patch.object(APIClient, "get_request", AsyncMock(side_effect=get_properties)),
     ):
         async with async_test_home_assistant(
@@ -304,7 +308,7 @@ async def test_restart_retains_registry_and_statistics(
         ) as first:
             await setup_registries(first)
             async with async_test_recorder(first) as recorder:
-                entry = MockConfigEntry(domain=DOMAIN, data=data, version=1)
+                entry = bound_entry(domain=DOMAIN, data=data)
                 entry.add_to_hass(first)
                 registry = er.async_get(first)
                 legacy = registry.async_get_or_create(
@@ -367,8 +371,9 @@ async def test_restart_retains_registry_and_statistics(
             async with async_test_recorder(second) as recorder:
                 entry = MockConfigEntry(
                     domain=DOMAIN,
-                    data=data,
-                    version=1,
+                    data={**data, CONF_DSN: "test-dsn"},
+                    unique_id=device_unique_id("test-dsn"),
+                    version=2,
                     entry_id=entry_id,
                 )
                 entry.add_to_hass(second)

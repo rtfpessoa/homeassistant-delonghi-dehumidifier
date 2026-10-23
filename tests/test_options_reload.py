@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import voluptuous as vol
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from tests.identity_helpers import bound_entry as MockConfigEntry
 
 ORIGINAL = {
     CONF_EMAIL: "old@example.com",
@@ -48,6 +48,7 @@ def mock_client():
         APIClient,
         authenticate=AsyncMock(return_value=True),
         get_first_device=AsyncMock(return_value="test-dsn"),
+        get_devices=AsyncMock(return_value=["test-dsn"]),
         get_properties=AsyncMock(return_value=properties),
     ):
         yield
@@ -104,7 +105,7 @@ async def test_successful_options_reload_and_unload(hass, mock_client):
     await hass.async_block_till_done()
 
     assert entry.options == UPDATED
-    assert entry.data == ORIGINAL
+    assert entry.data == {**ORIGINAL, "device_dsn": "test-dsn"}
     assert entry.runtime_data is not original_client
     assert client_settings(entry) == UPDATED
     assert len(entry.update_listeners) == 1
@@ -136,7 +137,7 @@ async def test_invalid_auth_does_not_save_or_reload(hass, mock_client):
     assert result["type"] == "form"
     assert result["errors"]["base"] == "invalid_auth"
     assert entry.options == UPDATED
-    assert entry.data == ORIGINAL
+    assert entry.data == {**ORIGINAL, "device_dsn": "test-dsn"}
     assert entry.runtime_data is original_client
     assert client_settings(entry) == UPDATED
     assert await hass.config_entries.async_unload(entry.entry_id)

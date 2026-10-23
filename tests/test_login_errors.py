@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
@@ -79,7 +78,9 @@ async def test_user_flow_classifies_login_errors(hass, error_code, expected):
 
 async def test_options_flow_reports_invalid_credentials(hass):
     """Existing entries get the same feedback without saving invalid settings."""
-    entry = MockConfigEntry(domain=DOMAIN, data=CONFIG)
+    from tests.identity_helpers import bound_entry
+
+    entry = bound_entry(domain=DOMAIN, data=CONFIG)
     entry.add_to_hass(hass)
     session = login_error_session(403042)
     with (

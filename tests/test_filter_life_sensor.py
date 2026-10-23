@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD, UnitOfTime
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from tests.identity_helpers import bound_entry as MockConfigEntry
 
 
 @pytest.mark.parametrize(
@@ -51,6 +51,7 @@ async def test_filter_life_minutes_are_reported_as_days(
     client_mocks = {
         "authenticate": AsyncMock(return_value=True),
         "get_first_device": AsyncMock(return_value="test-dsn"),
+        "get_devices": AsyncMock(return_value=["test-dsn"]),
         "get_properties": AsyncMock(return_value=properties),
     }
     # Actual API null handling belongs to a separate change.

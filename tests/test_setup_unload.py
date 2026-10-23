@@ -11,10 +11,10 @@ from homeassistant.const import (
     STATE_UNKNOWN,
 )
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from tests.identity_helpers import bound_entry as MockConfigEntry
 
 
 async def test_setup_and_unload_device(hass):
@@ -42,6 +42,7 @@ async def test_setup_and_unload_device(hass):
         for name, value in properties.items()
     ]
     entry = MockConfigEntry(
+        dsn="TEST-DSN",
         domain=DOMAIN,
         data={
             CONF_EMAIL: "test@example.com",
@@ -54,6 +55,7 @@ async def test_setup_and_unload_device(hass):
     with (
         patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
         patch.object(APIClient, "get_first_device", AsyncMock(return_value="TEST-DSN")),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["TEST-DSN"])),
         patch.object(
             APIClient, "get_request", AsyncMock(return_value=device_properties)
         ) as get_request,

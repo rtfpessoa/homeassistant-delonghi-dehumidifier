@@ -6,13 +6,13 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
 from custom_components.delonghi_dehumidifier_api.const import (
     DOMAIN,
     REAL_FEEL_ACTIVATION_PAYLOAD,
 )
+from tests.identity_helpers import bound_entry as MockConfigEntry
 
 
 @pytest.fixture
@@ -62,6 +62,7 @@ async def cloud(hass, request):
     with (
         patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
         patch.object(APIClient, "get_first_device", AsyncMock(return_value="test-dsn")),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["test-dsn"])),
         patch.object(APIClient, "get_request", AsyncMock(side_effect=read)) as get,
         patch.object(APIClient, "post_request", AsyncMock(return_value={})) as post,
     ):

@@ -16,13 +16,21 @@
         "data": {
           "password": "Password"
         }
+      },
+      "select_device": {
+        "description": "Select the intended device. Identifiers are private; if multiple devices are listed, verify the association before choosing. List order does not identify a device.",
+        "data": {
+          "device_dsn": "Device"
+        }
       }
     },
     "error": {
       "cannot_connect": "Could not connect to De'Longhi. Please try again.",
       "invalid_auth": "Could not sign in. Check your email and password, or try again later.",
       "unknown": "An unexpected error occurred. Please try again.",
-      "no_devices": "No devices were found in this De'Longhi account. Add a device in the De'Longhi app first."
+      "no_devices": "No devices were found in this De'Longhi account. Add a device in the De'Longhi app first.",
+      "device_not_available": "The selected device is not available on this account.",
+      "ownership_unavailable": "Device ownership could not be read or saved. Restore a full Home Assistant backup."
     },
     "abort": {
       "already_configured": "This device is already configured.",
@@ -48,7 +56,11 @@
       "invalid_auth": "Could not sign in. Check your email and password, or try again later.",
       "unknown": "An unexpected error occurred. Please try again.",
       "no_devices": "No devices were found in this De'Longhi account. Add a device in the De'Longhi app first.",
-      "cannot_connect": "Could not connect to De'Longhi. Please try again."
+      "cannot_connect": "Could not connect to De'Longhi. Please try again.",
+      "device_not_available": "The selected device is not available on this account."
+    },
+    "abort": {
+      "reauth_settings_changed": "The integration settings changed. Please open the options again."
     }
   },
   "entity": {
@@ -137,5 +149,56 @@
     "mode_activity_dry_clothes": "Reported mode: Dry clothes",
     "mode_activity_purifier": "Reported mode: Purifier",
     "mode_activity_real_feel": "Reported mode: Real Feel"
+  },
+  "issues": {
+    "device_binding": {
+      "title": "Review device binding",
+      "description": "This integration needs an explicit device binding. Existing devices and history are retained.",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "description": "Previously associated devices: {devices}. Select the matching device and verify its association. If you cannot identify it, stop; list order does not identify a device. An existing binding cannot be changed.",
+            "data": {
+              "device_dsn": "Device",
+              "discover_other_devices": "Find other devices in this account"
+            }
+          },
+          "owner": {
+            "description": "Choose the entry that will own this device. Leave account fields empty to use that entry's saved credentials. If shown, select the option to use credentials entered during discovery; fields entered here take precedence. Replacements are saved only after successful verification.",
+            "data": {
+              "owner": "Owner",
+              "email": "New account email (optional)",
+              "language": "New account language (optional)",
+              "password": "New password (optional)",
+              "use_discovery_credentials": "Use credentials entered during discovery for this entry"
+            }
+          },
+          "confirm": {
+            "description": "Confirm this binding. Home Assistant may reassociate existing entities with the winner; their IDs and history are retained. Other associations remain. Deleting an entry can cause Home Assistant to remove its entities."
+          },
+          "discover": {
+            "description": "Device discovery failed. Leave the fields empty to retry saved credentials, or enter replacements.",
+            "data": {
+              "email": "New account email (optional)",
+              "language": "New account language (optional)",
+              "password": "New password (optional)"
+            }
+          }
+        },
+        "error": {
+          "invalid_auth": "Could not sign in.",
+          "cannot_connect": "Could not connect to De'Longhi. Please try again.",
+          "no_devices": "No associated devices were found.",
+          "device_not_available": "The selected device is not available on this account.",
+          "unknown": "An unexpected error occurred.",
+          "ownership_unavailable": "Device ownership could not be read or saved. Restore a full Home Assistant backup."
+        },
+        "abort": {
+          "entry_removed": "The entry was removed.",
+          "settings_changed": "Settings changed. Start the repair again.",
+          "already_bound": "The device is already bound."
+        }
+      }
+    }
   }
 }
