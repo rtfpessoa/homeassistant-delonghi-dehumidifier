@@ -18,6 +18,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.delonghi_dehumidifier_api.client import (
     APIClient,
     InvalidCredentialsError,
+    NoDevicesError,
     TransientCloudError,
 )
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
@@ -60,6 +61,149 @@ async def test_new_setup_offers_discovered_identities(hass, devices, caplog):
         "private-a" in r.getMessage() or "secret" in r.getMessage()
         for r in caplog.records
     )
+
+
+async def test_device_selection_avoids_deprecated_registry_access(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=DATA)
+    entry.add_to_hass(hass)
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "private-a")},
+        name="Living room",
+    )
+    with (
+        patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["private-a"])),
+        patch.object(APIClient, "post_request", AsyncMock()) as post,
+        patch.object(dr, "report_usage") as report,
+    ):
+        form = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        form = await hass.config_entries.flow.async_configure(form["flow_id"], DATA)
+        assert dict(field(form, CONF_DSN)["options"]) == {
+            "private-a": "Living room (private-a)"
+        }
+        forbidden = (
+            "uses `device_registry.devices` as a mapping",
+            "calls `device_registry.async_get_device`",
+        )
+        assert not [
+            call.args[0]
+            for call in report.call_args_list
+            if any(message in call.args[0] for message in forbidden)
+        ]
+        post.assert_not_awaited()
+        hass.config_entries.flow.async_abort(form["flow_id"])
+
+
+async def test_device_selection_keeps_names_and_discovery_order_on_retry(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=DATA)
+    entry.add_to_hass(hass)
+    registry = dr.async_get(hass)
+    renamed = registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "private-a"), (DOMAIN, "private-multi")},
+        name="Factory name",
+    )
+    registry.async_update_device(renamed.id, name_by_user="Living room")
+    disabled = registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "private-b")},
+        name="Laundry room",
+    )
+    registry.async_update_device(disabled.id, disabled_by=dr.DeviceEntryDisabler.USER)
+    unnamed = registry.async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={(DOMAIN, "private-c")}
+    )
+    registry.async_update_device(unnamed.id, name=None)
+    registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("unrelated", "private-d")},
+        name="Unrelated device",
+    )
+    registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "not-discovered")},
+        name="Not discovered",
+    )
+    discovered = [
+        "private-b",
+        "private-a",
+        "private-c",
+        "private-d",
+        "private-e",
+        "private-multi",
+    ]
+    expected = [
+        ("private-b", "Laundry room (private-b)"),
+        ("private-a", "Living room (private-a)"),
+        ("private-c", "private-c"),
+        ("private-d", "private-d"),
+        ("private-e", "private-e"),
+        ("private-multi", "Living room (private-multi)"),
+    ]
+    with (
+        patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
+        patch.object(
+            APIClient,
+            "get_devices",
+            AsyncMock(side_effect=[discovered, NoDevicesError()]),
+        ),
+        patch.object(APIClient, "post_request", AsyncMock()) as post,
+    ):
+        form = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        form = await hass.config_entries.flow.async_configure(form["flow_id"], DATA)
+        assert field(form, CONF_DSN)["options"] == expected
+        form = await hass.config_entries.flow.async_configure(
+            form["flow_id"], {CONF_DSN: "private-a"}
+        )
+        assert form["errors"]["base"] == "no_devices"
+        assert field(form, CONF_DSN)["options"] == expected
+        post.assert_not_awaited()
+        hass.config_entries.flow.async_abort(form["flow_id"])
+
+
+async def test_device_selection_keeps_last_named_match_for_shared_identifier(hass):
+    registry = dr.async_get(hass)
+    separates_shared_devices = hasattr(registry, "async_get_devices")
+    entries = [MockConfigEntry(domain=DOMAIN, data=DATA) for _ in range(3)]
+    for entry in entries:
+        entry.add_to_hass(hass)
+    first = registry.async_get_or_create(
+        config_entry_id=entries[0].entry_id,
+        identifiers={(DOMAIN, "private-a")},
+        name="First",
+    )
+    second = registry.async_get_or_create(
+        config_entry_id=entries[1].entry_id,
+        identifiers={(DOMAIN, "private-a")},
+        name="Second",
+    )
+    second = registry.async_update_device(second.id, name_by_user="Second renamed")
+    unnamed = registry.async_get_or_create(
+        config_entry_id=entries[2].entry_id, identifiers={(DOMAIN, "private-a")}
+    )
+    registry.async_update_device(unnamed.id, name=None)
+    assert len({first.id, second.id, unnamed.id}) == (
+        3 if separates_shared_devices else 1
+    )
+    with (
+        patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["private-a"])),
+        patch.object(APIClient, "post_request", AsyncMock()) as post,
+    ):
+        form = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        form = await hass.config_entries.flow.async_configure(form["flow_id"], DATA)
+        assert dict(field(form, CONF_DSN)["options"]) == {
+            "private-a": "Second renamed (private-a)"
+        }
+        post.assert_not_awaited()
+        hass.config_entries.flow.async_abort(form["flow_id"])
 
 
 @pytest.mark.parametrize("properties", [[], [{}], [{"product_name": None}]])
