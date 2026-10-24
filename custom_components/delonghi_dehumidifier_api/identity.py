@@ -12,12 +12,14 @@ import sys
 from contextlib import asynccontextmanager
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.json import save_json
 
+from .client import usable_dsn
 from .const import DOMAIN
 
 CONF_DSN = "device_dsn"
@@ -183,6 +185,64 @@ def binding_lock(hass: HomeAssistant) -> asyncio.Lock:
     return hass.data[key]
 
 
+def client_settings_match(entry: ConfigEntry, client) -> bool:
+    """Compare only effective settings used to authenticate this client."""
+    settings = {**entry.data, **entry.options}
+    return all(
+        settings.get(key) == getattr(client, attribute)
+        for key, attribute in (
+            (CONF_EMAIL, "email"),
+            (CONF_PASSWORD, "password"),
+            (CONF_LANGUAGE, "language"),
+        )
+    )
+
+
+def _lifecycle_entries(hass: HomeAssistant, name: str) -> set[str]:
+    return hass.data.setdefault(f"{DOMAIN}_{name}", set())
+
+
+def unloading_entries(hass: HomeAssistant) -> set[str]:
+    """Entries whose platform unload has started but not completed."""
+    return _lifecycle_entries(hass, "unloading")
+
+
+def restart_required_entries(hass: HomeAssistant) -> set[str]:
+    """Entries with potentially partial platform cleanup in this process."""
+    return _lifecycle_entries(hass, "restart_required")
+
+
+def restart_required_devices(hass: HomeAssistant) -> set[str]:
+    """Device identities with potentially partial platform cleanup."""
+    return _lifecycle_entries(hass, "restart_required_devices")
+
+
+def device_needs_restart(hass: HomeAssistant, dsn: object) -> bool:
+    """Check a verified or selected device without exposing its identifier."""
+    return usable_dsn(dsn) and device_unique_id(dsn) in restart_required_devices(hass)
+
+
+def require_restart(hass: HomeAssistant, entry_id: str, dsn: object) -> None:
+    """Fence both the entry and its verified device for this HA process."""
+    restart_required_entries(hass).add(entry_id)
+    if usable_dsn(dsn):
+        restart_required_devices(hass).add(device_unique_id(dsn))
+
+
+def runtime_is_current(hass: HomeAssistant, entry: ConfigEntry, client) -> bool:
+    """Check the live runtime without treating rejected credentials as stale."""
+    return (
+        hass.config_entries.async_get_entry(entry.entry_id) is entry
+        and not entry.disabled_by
+        and entry.state is ConfigEntryState.LOADED
+        and getattr(entry, "runtime_data", None) is client
+        and entry.entry_id not in unloading_entries(hass)
+        and entry.entry_id not in restart_required_entries(hass)
+        and not client.closed
+        and client_settings_match(entry, client)
+    )
+
+
 def registry_dsns(hass: HomeAssistant, entry: ConfigEntry) -> set[str]:
     """Include disabled devices and preserve all pre-existing associations."""
     registry = dr.async_get(hass)
@@ -230,10 +290,6 @@ def _command_owner_matches(
     """Require the journal, live entry and device binding to agree."""
     if record is None or record["owner"] != entry.entry_id:
         return False
-    if hass.config_entries.async_get_entry(entry.entry_id) is not entry:
-        return False
-    if entry.state is not ConfigEntryState.LOADED or entry.runtime_data is not client:
-        return False
     if entry.data.get(CONF_DSN) != dsn or entry.unique_id != device_unique_id(dsn):
         return False
     return not any(owner is not entry for owner in claimants(hass, dsn))
@@ -243,16 +299,33 @@ def _command_owner_matches(
 async def command_guard(hass: HomeAssistant, entry: ConfigEntry, dsn: str, client):
     """Fence stale owners, and prevent transfer while a device POST is in flight."""
     async with binding_lock(hass):
+
+        def require_current_runtime() -> None:
+            if device_needs_restart(hass, dsn):
+                raise HomeAssistantError(
+                    "Restart Home Assistant before using this integration"
+                ) from None
+            if (
+                not runtime_is_current(hass, entry, client)
+                or client.invalid_credentials
+            ):
+                raise HomeAssistantError(
+                    "Integration is changing; try again after reload"
+                ) from None
+
+        require_current_runtime()
         try:
             path = hass.config.path(".storage", f"{DOMAIN}.claims")
             journal = await hass.async_add_executor_job(_read_journal, path)
+            require_current_runtime()
             hass.data[JOURNAL_KEY] = journal
             record = journal.get(device_unique_id(dsn))
             if not _command_owner_matches(hass, entry, dsn, client, record):
                 raise ClaimJournalError("Device ownership needs recovery")
-        except ClaimJournalError as err:
+        except ClaimJournalError:
+            require_current_runtime()
             create_binding_issue(hass, entry)
-            raise HomeAssistantError("Device ownership needs recovery") from err
+            raise HomeAssistantError("Device ownership needs recovery") from None
         commands = hass.data.setdefault(f"{DOMAIN}_active_commands", {})
         commands[entry.entry_id] = commands.get(entry.entry_id, 0) + 1
     try:

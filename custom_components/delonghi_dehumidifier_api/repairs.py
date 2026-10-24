@@ -30,6 +30,7 @@ from .identity import (
     binding_lock,
     claimants,
     create_binding_issue,
+    device_needs_restart,
     device_unique_id,
     load_journal,
     pending_claim,
@@ -106,11 +107,17 @@ class BindingRepair(RepairsFlow):
         self._dsn = dsn
         if not usable_dsn(self._dsn):
             return self._show_init(entry, {"base": "device_not_available"})
+        if device_needs_restart(self.hass, self._dsn):
+            return self.async_abort(reason="restart_required")
         try:
             async with binding_lock(self.hass):
                 await reload_journal(self.hass)
         except ClaimJournalError:
+            if device_needs_restart(self.hass, self._dsn):
+                return self.async_abort(reason="restart_required")
             return self._show_init(entry, {"base": "ownership_unavailable"})
+        if device_needs_restart(self.hass, self._dsn):
+            return self.async_abort(reason="restart_required")
         entries = self.hass.config_entries.async_entries(DOMAIN)
         self._choices = {
             item.entry_id: f"{item.title} ({item.entry_id[-6:]})"
@@ -178,6 +185,8 @@ class BindingRepair(RepairsFlow):
 
     async def async_step_owner(self, user_input: dict[str, Any] | None = None):
         """Choose an owner and optional credentials, including discovery reuse."""
+        if device_needs_restart(self.hass, self._dsn):
+            return self.async_abort(reason="restart_required")
         if user_input is not None:
             self._owner_id = user_input["owner"]
             self._credentials = {
@@ -193,9 +202,19 @@ class BindingRepair(RepairsFlow):
                 },
             }
             self._snapshot = self._current_snapshot()
-            self._election = (await load_journal(self.hass)).get(
-                device_unique_id(self._dsn)
-            )
+            try:
+                self._election = (await load_journal(self.hass)).get(
+                    device_unique_id(self._dsn)
+                )
+            except ClaimJournalError:
+                if device_needs_restart(self.hass, self._dsn):
+                    return self.async_abort(reason="restart_required")
+                entry = self.hass.config_entries.async_get_entry(self._entry_id)
+                if entry is None:
+                    return self.async_abort(reason="entry_removed")
+                return self._show_init(entry, {"base": "ownership_unavailable"})
+            if device_needs_restart(self.hass, self._dsn):
+                return self.async_abort(reason="restart_required")
             return await self.async_step_confirm()
         fields = {
             vol.Required("owner"): vol.In(self._choices),
@@ -225,6 +244,8 @@ class BindingRepair(RepairsFlow):
 
     async def async_step_confirm(self, user_input: dict[str, Any] | None = None):
         """Verify account access and elect the selected device's owner."""
+        if device_needs_restart(self.hass, self._dsn):
+            return self.async_abort(reason="restart_required")
         if user_input is None:
             return self._show_confirm()
         entry = self.hass.config_entries.async_get_entry(self._owner_id)
@@ -278,12 +299,18 @@ class BindingRepair(RepairsFlow):
         """Recheck and persist the election before updating entries under lock."""
         async with binding_lock(self.hass):
             manager = repairs_flow_manager(self.hass)
+            if device_needs_restart(self.hass, self._dsn):
+                return self.async_abort(reason="restart_required")
             try:
                 current_election = (await reload_journal(self.hass)).get(
                     device_unique_id(self._dsn)
                 )
             except ClaimJournalError:
+                if device_needs_restart(self.hass, self._dsn):
+                    return self.async_abort(reason="restart_required")
                 return self._show_confirm("ownership_unavailable")
+            if device_needs_restart(self.hass, self._dsn):
+                return self.async_abort(reason="restart_required")
             if self._election_context_is_stale(manager, current_election):
                 return self.async_abort(reason="settings_changed")
             owners = claimants(self.hass, self._dsn)
@@ -297,7 +324,11 @@ class BindingRepair(RepairsFlow):
             try:
                 await self._save_election(entry)
             except ClaimJournalError:
+                if device_needs_restart(self.hass, self._dsn):
+                    return self.async_abort(reason="restart_required")
                 return self._show_confirm("ownership_unavailable")
+            if device_needs_restart(self.hass, self._dsn):
+                return self.async_abort(reason="restart_required")
             if self._current_snapshot() != self._snapshot or not self._flow_is_active(
                 manager
             ):

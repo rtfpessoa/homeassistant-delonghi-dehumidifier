@@ -34,6 +34,7 @@
     },
     "abort": {
       "already_configured": "This device is already configured.",
+      "restart_required": "Restart Home Assistant before setting up this device again.",
       "reauth_successful": "Reauthentication was successful.",
       "reauth_settings_changed": "The integration settings changed. Please start reauthentication again.",
       "reauth_cancelled": "Reauthentication was cancelled."
@@ -196,7 +197,8 @@
         "abort": {
           "entry_removed": "The entry was removed.",
           "settings_changed": "Settings changed. Start the repair again.",
-          "already_bound": "The device is already bound."
+          "already_bound": "The device is already bound.",
+          "restart_required": "Restart Home Assistant before repairing this device binding."
         }
       }
     }

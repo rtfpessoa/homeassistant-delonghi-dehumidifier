@@ -35,10 +35,12 @@ from .identity import (
     ClaimJournalError,
     binding_lock,
     claimants,
+    device_needs_restart,
     device_unique_id,
     pending_claim,
     reload_journal,
     reserve_enrollment,
+    runtime_is_current,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,6 +92,7 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 entry is None
                 or entry.state is not ConfigEntryState.LOADED
                 or entry.runtime_data.reauth_id != runtime_id
+                or not runtime_is_current(self.hass, entry, entry.runtime_data)
             ):
                 return self.async_abort(reason="reauth_cancelled")
         return await self.async_step_reauth_confirm()
@@ -259,14 +262,20 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def _enroll_selected_device(self, dsn: str, title: str) -> ConfigFlowResult:
         """Reserve and create the selected entry in one locked transaction."""
         async with binding_lock(self.hass):
+            if device_needs_restart(self.hass, dsn):
+                return self.async_abort(reason="restart_required")
             try:
                 journal = await reload_journal(self.hass)
             except ClaimJournalError:
+                if device_needs_restart(self.hass, dsn):
+                    return self.async_abort(reason="restart_required")
                 return self.async_show_form(
                     step_id="select_device",
                     data_schema=self._selection_schema(),
                     errors={"base": "ownership_unavailable"},
                 )
+            if device_needs_restart(self.hass, dsn):
+                return self.async_abort(reason="restart_required")
             if not any(
                 flow["flow_id"] == self.flow_id
                 for flow in self.hass.config_entries.flow.async_progress_by_handler(
@@ -286,6 +295,8 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ):
                 return self.async_abort(reason="already_configured")
             await self.async_set_unique_id(device_unique_id(dsn))
+            if device_needs_restart(self.hass, dsn):
+                return self.async_abort(reason="restart_required")
             self._abort_if_unique_id_configured()
             token = reserve_enrollment(self.hass, dsn)
             return self.async_create_entry(

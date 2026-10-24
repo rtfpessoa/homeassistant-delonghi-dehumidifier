@@ -667,7 +667,7 @@ async def test_unloaded_client_is_fenced_before_post(hass):
         client.get_access_token = AsyncMock(return_value="token")
         client.session = Mock()
         assert await hass.config_entries.async_unload(entry.entry_id)
-        with pytest.raises(HomeAssistantError, match="ownership"):
+        with pytest.raises(HomeAssistantError, match="reload"):
             await client.set_status(Status.ON)
         client.session.post.assert_not_called()
 
@@ -982,7 +982,7 @@ async def test_transfer_waits_for_old_owner_command_and_fences_old_client(hass):
         assert result["type"] == "create_entry"
         await hass.async_block_till_done(wait_background_tasks=True)
         assert second.state is ConfigEntryState.LOADED
-        with pytest.raises(HomeAssistantError, match="ownership"):
+        with pytest.raises(HomeAssistantError, match="reload"):
             await old_client.set_status(Status.ON)
         assert old_client.session.post.call_count == 1
         await second.runtime_data.async_shutdown()

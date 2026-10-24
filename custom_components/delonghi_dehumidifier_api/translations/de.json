@@ -34,6 +34,7 @@
     },
     "abort": {
       "already_configured": "Dieses Gerät ist bereits eingerichtet.",
+      "restart_required": "Starte Home Assistant neu, bevor du dieses Gerät erneut einrichtest.",
       "reauth_successful": "Die erneute Anmeldung war erfolgreich.",
       "reauth_settings_changed": "Die Integrationseinstellungen wurden geändert. Bitte starte den Anmeldevorgang erneut.",
       "reauth_cancelled": "Die erneute Anmeldung wurde abgebrochen."
@@ -196,7 +197,8 @@
         "abort": {
           "entry_removed": "Der Eintrag wurde entfernt.",
           "settings_changed": "Die Einstellungen wurden geändert. Starte die Reparatur erneut.",
-          "already_bound": "Das Gerät ist bereits zugeordnet."
+          "already_bound": "Das Gerät ist bereits zugeordnet.",
+          "restart_required": "Starte Home Assistant neu, bevor du die Gerätezuordnung reparierst."
         }
       }
     }

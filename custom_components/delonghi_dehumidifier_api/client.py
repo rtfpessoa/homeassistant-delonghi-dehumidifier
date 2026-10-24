@@ -789,6 +789,11 @@ class APIClient:
             request.exception()
 
     @property
+    def closed(self) -> bool:
+        """Whether the runtime client has been shut down."""
+        return self._closed
+
+    @property
     def invalid_credentials(self) -> bool:
         """Whether the provider confirmed rejection of this client's credentials."""
         return self._invalid_credentials
@@ -796,7 +801,9 @@ class APIClient:
     def subscribe_auth_failure(
         self, listener: Callable[[], None]
     ) -> Callable[[], None]:
-        """Subscribe to credential rejection and return an unsubscribe callback."""
+        """Subscribe to availability changes and return an unsubscribe callback."""
+        if self._closed:
+            return lambda: None
         self._auth_listeners.add(listener)
         return lambda: self._auth_listeners.discard(listener)
 
@@ -808,7 +815,17 @@ class APIClient:
 
     async def async_shutdown(self) -> None:
         """Cancel pending requests when the associated entry is unloaded."""
-        self._closed = True
+        if not self._closed:
+            self._closed = True
+            listeners = tuple(self._auth_listeners)
+            self._auth_listeners.clear()
+            for listener in listeners:
+                try:
+                    listener()
+                except Exception as err:  # noqa: BLE001 - still notify others and close
+                    _LOGGER.warning(
+                        "Unable to update entity availability (%s)", type(err).__name__
+                    )
         self.action_refresh.close()
         self._properties_idle.set()
         self.on_invalid_credentials = None
