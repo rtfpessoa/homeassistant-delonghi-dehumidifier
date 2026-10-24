@@ -1,9 +1,11 @@
 """Exercise the best-effort Real Feel mode through Home Assistant."""
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_component import async_update_entity
@@ -92,7 +94,7 @@ async def test_mode_capability_is_limited_to_tested_identity(
         (1, None, None),
         (1, True, None),
         ("1", REAL_FEEL_ACTIVATION_PAYLOAD, None),
-        (True, REAL_FEEL_ACTIVATION_PAYLOAD, None),
+        (1.0, REAL_FEEL_ACTIVATION_PAYLOAD, None),
         (100, REAL_FEEL_ACTIVATION_PAYLOAD, None),
     ],
 )
@@ -104,6 +106,69 @@ async def test_snapshot_mode_mapping(hass, cloud, device_mode, command, expected
     state = hass.states.get(humidifier_id(hass))
     assert state.attributes["mode"] == expected
     assert state.attributes["current_humidity"] == 50
+
+
+@pytest.mark.parametrize("invalid", [True, False, 1.5, "secret-bad-mode"])
+async def test_invalid_tested_mode_rejects_whole_snapshot_and_recovers(
+    hass, cloud, caplog, invalid
+):
+    """A bad tested-device mode cannot publish the other snapshot values."""
+    await setup(hass, cloud)
+    entity_id = humidifier_id(hass)
+    entity = hass.data["humidifier"].get_entity(entity_id)
+    assert hass.states.get(entity_id).attributes["mode"] == "REAL_FEEL"
+    previous = (
+        entity.mode,
+        entity.target_humidity,
+        entity.current_humidity,
+        entity.is_on,
+    )
+    cloud[1].update(
+        device_mode=invalid, humidity_setpoint=45, current_humidity=43, device_status=2
+    )
+    with caplog.at_level(logging.DEBUG):
+        await refresh(hass, cloud)
+    assert hass.states.get(entity_id).state == STATE_UNAVAILABLE
+    assert (
+        entity.mode,
+        entity.target_humidity,
+        entity.current_humidity,
+        entity.is_on,
+    ) == previous
+    assert "secret-bad-mode" not in caplog.text
+    cloud[1]["device_mode"] = 2
+    await refresh(hass, cloud)
+    state = hass.states.get(entity_id)
+    assert state.state == "off"
+    assert state.attributes["mode"] == "DRY_CLOTHES"
+    assert state.attributes["humidity"] == 45
+    assert state.attributes["current_humidity"] == 43
+
+
+async def test_invalid_duplicate_tested_mode_rejects_snapshot(hass, cloud):
+    """A malformed duplicate cannot hide behind strict ambiguous-mode detection."""
+    await setup(hass, cloud)
+    records = cloud[2]()
+    records.append({"property": {"name": "device_mode", "value": True}})
+    cloud[3].side_effect = None
+    cloud[3].return_value = records
+    await refresh(hass, cloud)
+    assert hass.states.get(humidifier_id(hass)).state == STATE_UNAVAILABLE
+
+
+@pytest.mark.parametrize("cloud", [{"set_eco": True}], indirect=True)
+async def test_malformed_switch_value_during_setup_recovers(hass, cloud):
+    """An invalid startup value creates an unavailable switch, not a lost platform."""
+    await setup(hass, cloud)
+    switch = er.async_get(hass).async_get_entity_id(
+        "switch", DOMAIN, f"{DOMAIN}_test-dsn_eco_mode_switch"
+    )
+    assert switch
+    assert hass.states.get(switch).state == STATE_UNAVAILABLE
+    cloud[1]["set_eco"] = 1
+    cloud[0].runtime_data.invalidate_properties()
+    await async_update_entity(hass, switch)
+    assert hass.states.get(switch).state == "on"
 
 
 @pytest.mark.parametrize(

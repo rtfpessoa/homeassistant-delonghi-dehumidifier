@@ -2,11 +2,78 @@
 
 import logging
 import time
+import traceback
 from unittest.mock import AsyncMock
 
 import pytest
 
-from custom_components.delonghi_dehumidifier_api.client import APIClient
+from custom_components.delonghi_dehumidifier_api.client import (
+    APIClient,
+    InvalidNumericStateError,
+)
+from custom_components.delonghi_dehumidifier_api.humidifier import _int_property
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, None),
+        (0, 0),
+        (-17, -17),
+        (42.0, 42),
+        (-0.0, 0),
+        (" +0012 ", 12),
+        ("-12", -12),
+        ("١٢", 12),
+        ("1_000", 1000),
+    ],
+)
+async def test_integer_cloud_state_accepts_supported_values(raw, expected):
+    """Both readers preserve the existing supported integral representations."""
+    client = APIClient(None, "en", "user", "password")
+    client.get_property = AsyncMock(return_value=raw)
+    assert await client.get_int_property("value") == expected
+    assert _int_property([{"name": "value", "value": raw}], "value") == expected
+    assert _int_property([], "value") is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        True,
+        False,
+        1.5,
+        -1.5,
+        float("nan"),
+        float("inf"),
+        -float("inf"),
+        "1.0",
+        "secret-invalid-number",
+        "9" * 5000,
+        "１２.０",
+        [],
+        {},
+        object(),
+    ],
+)
+async def test_invalid_integer_cloud_state_is_sanitized(raw):
+    """Malformed states cannot be coerced or exposed by conversion exceptions."""
+    client = APIClient(None, "en", "user", "password")
+    client.get_property = AsyncMock(return_value=raw)
+    for read in (
+        lambda: client.get_int_property("value"),
+        lambda: _read_snapshot_integer(raw),
+    ):
+        with pytest.raises(InvalidNumericStateError) as error:
+            await read()
+        rendered = "".join(traceback.format_exception(error.value))
+        assert str(error.value) == "Invalid numeric cloud state"
+        assert "secret-invalid-number" not in rendered
+        assert "9" * 5000 not in rendered
+
+
+async def _read_snapshot_integer(raw):
+    return _int_property([{"name": "value", "value": raw}], "value")
 
 
 class FakeResponse:
