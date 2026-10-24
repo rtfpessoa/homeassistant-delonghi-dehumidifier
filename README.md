@@ -32,7 +32,7 @@ and search for **DeLonghi Dehumidifier (API)**. You can also use My Home Assista
 3. Copy the `custom_components/delonghi_dehumidifier_api` folder into your Home Assistant's `custom_components` folder.
 4. Restart Home Assistant, then follow the configuration steps below.
 
-The automated tests cover Home Assistant 2025.2.4 and 2026.10.2 with a mocked cloud API.
+The automated tests cover Home Assistant 2025.2.4 and 2026.10.3 with a mocked cloud API.
 
 ### Versions
 
