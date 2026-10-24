@@ -72,6 +72,9 @@
       "current_speed": {
         "name": "Aktuelle Geschwindigkeit"
       },
+      "current_speed_raw": {
+        "name": "Aktuelle Geschwindigkeit (Rohwert)"
+      },
       "filter_status": {
         "name": "Filterstatus"
       },

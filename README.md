@@ -71,7 +71,7 @@ This custom component creates following entities for the dehumidifier:
 | `humidifier` | Dehumidifier entity with selectable modes `DEHUMIDIFY`, `DRY_CLOTHES`, and `PURIFIER`; `REAL_FEEL` on the tested DDSX220 firmware. |
 | `sensor`     | Sensors for current relative humidity measured by dehumidifier.                                                                  |
 | `sensor`     | Sensors for target humidity set in the dehumidifier.                                                                             |
-| `sensor`     | Sensors for current speed.                                                                                                       |
+| `sensor`     | Diagnostic sensor for the raw `current_speed` cloud value.                                                                       |
 | `sensor`     | Sensors for filter status.                                                                                                       |
 | `sensor`     | Sensors for room temperature.                                                                                                    |
 | `sensor`     | Sensors for heat exchanger temperature.                                                                                          |
@@ -84,6 +84,14 @@ This custom component creates following entities for the dehumidifier:
 | `binary_sensor` | Device alarm using observed alarm values.                                                                                      |
 | `switch`     | Switch to enable eco mode.                                                                                                       |
 | `switch`     | Switch to enable fan swing.                                                                                                      |
+
+The **Current speed (raw)** diagnostic sensor reports the cloud's
+`current_speed` number without a unit; its meaning and scale are not established.
+It replaces the former **Current Speed** sensor, which labeled the number as m/s
+without verification. The old entity and its settings and statistics remain, but it no
+longer reports live values. Its m/s label does not establish the meaning of its
+history. The new sensor has a separate history; update dashboards and
+automations to use its new entity ID.
 
 The **Cloud mode (raw)** diagnostic sensor shows the cloud's `device_mode`
 value as a name. On the tested DDSX220, it can read `DEHUMIDIFY` while Real Feel

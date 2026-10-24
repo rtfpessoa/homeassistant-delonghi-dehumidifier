@@ -23,7 +23,7 @@ from custom_components.delonghi_dehumidifier_api.const import (
 SENSOR_NAMES = {
     "current_humidity": ("Current Humidity", "Aktuelle Luftfeuchtigkeit"),
     "target_humidity": ("Target Humidity", "Soll-Luftfeuchtigkeit"),
-    "current_speed": ("Current Speed", "Aktuelle Geschwindigkeit"),
+    "current_speed_raw": ("Current speed (raw)", "Aktuelle Geschwindigkeit (Rohwert)"),
     "filter_status": ("Filter Status", "Filterstatus"),
     "room_temperature": ("Room Temperature", "Raumtemperatur"),
     "heat_exchanger_temperature": (
@@ -255,9 +255,10 @@ def assert_before_names(registry):
     for domain, names in ENTITY_NAMES.items():
         for key, (english, _) in names.items():
             entry = registered(registry, domain, key)
-            legacy_name = (
-                "Device Mode" if (domain, key) == ("sensor", "device_mode") else english
-            )
+            legacy_name = {
+                ("sensor", "device_mode"): "Device Mode",
+                ("sensor", "current_speed_raw"): "Current Speed Raw",
+            }.get((domain, key), english)
             assert entry.original_name == legacy_name
             assert entry.translation_key is None
 

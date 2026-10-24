@@ -41,7 +41,7 @@ _Adds support for DeLonghi dehumidifier appliances via API_
 | `humidifier` | Dehumidifier entity. Depending on the model following modes are supported: `DEHUMIDIFY`, `DRY_CLOTHES`, `PURIFIER`, `REAL_FEEL`. |
 | `sensor`     | Sensors for current relative humidity measured by dehumidifier.                                                                  |
 | `sensor`     | Sensors for target humidity set in the dehumidifier.                                                                             |
-| `sensor`     | Sensors for current speed.                                                                                                       |
+| `sensor`     | Diagnostic sensor for the raw `current_speed` cloud value.                                                                       |
 | `sensor`     | Sensors for filter status.                                                                                                       |
 | `sensor`     | Sensors for room temperature.                                                                                                    |
 | `sensor`     | Sensors for heat exchanger temperature.                                                                                          |
@@ -53,6 +53,13 @@ _Adds support for DeLonghi dehumidifier appliances via API_
 | `sensor`     | Sensors for filter life.                                                                                                         |
 | `switch`     | Switch to enable eco mode.                                                                                                       |
 | `switch`     | Switch to enable fan swing.                                                                                                      |
+
+The **Current speed (raw)** sensor reports the cloud's `current_speed` number
+without a unit because its meaning and scale are unknown. It replaces the old
+Current Speed entity, which labeled values as m/s without verification. The old entity,
+settings and statistics remain without new readings; the new sensor has separate
+history. Update dashboards and automations to use the new entity ID. The old
+m/s label does not establish the meaning of the recorded values.
 
 {% if not installed %}
 ## Installation
