@@ -620,7 +620,7 @@ async def test_invalid_mode_does_not_schedule_followup(hass, device):
 async def test_tested_real_feel_actions_refresh_all_entities(hass, cloud, mode):
     """The guarded mode path also schedules the shared observation."""
     await real_feel_helpers.setup(hass, cloud)
-    _, properties, _, get, post = cloud
+    entry, properties, _, get, post = cloud
     registry = er.async_get(hass)
     humidifier = registry.async_get_entity_id(
         "humidifier", DOMAIN, f"{DOMAIN}_test-dsn_dehumidifier"
@@ -628,7 +628,20 @@ async def test_tested_real_feel_actions_refresh_all_entities(hass, cloud, mode):
     humidity = registry.async_get_entity_id(
         "sensor", DOMAIN, f"{DOMAIN}_test-dsn_current_humidity_sensor"
     )
-    with patch.object(action_refresh, "_REFRESH_DELAY", 0.05):
+    refresh = entry.runtime_data.action_refresh
+    original_refresh = refresh._refresh
+    reads_before_refresh = []
+
+    def observe_refresh():
+        reads_before_refresh.append(get.await_count)
+        original_refresh()
+
+    assert hass.states.get(humidity).state != "57"
+    properties["current_humidity"] = 57
+    with (
+        patch.object(action_refresh, "_REFRESH_DELAY", 0.05),
+        patch.object(refresh, "_refresh", observe_refresh),
+    ):
         await hass.services.async_call(
             "humidifier",
             "set_mode",
@@ -636,11 +649,11 @@ async def test_tested_real_feel_actions_refresh_all_entities(hass, cloud, mode):
             blocking=True,
         )
         await hass.async_block_till_done(wait_background_tasks=True)
-        reads = get.await_count
-        properties["current_humidity"] = 57
         await wait_for_state(hass, humidity, "57")
         await hass.async_block_till_done(wait_background_tasks=True)
-    assert get.await_count == reads + 1
+    assert hass.states.get(humidity).state == "57"
+    assert len(reads_before_refresh) == 1
+    assert get.await_count == reads_before_refresh[0] + 1
     assert post.await_count == 1
 
 
