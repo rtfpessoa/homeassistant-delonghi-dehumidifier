@@ -10,7 +10,12 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers import entity_registry as er
 
-from .client import APIClient, InvalidCredentialsError
+from .client import (
+    APIClient,
+    InvalidCredentialsError,
+    NoDevicesError,
+    TransientCloudError,
+)
 from .const import DOMAIN, RUNTIME_REAUTH_ID
 
 _PLATFORMS: list[Platform] = [
@@ -35,33 +40,48 @@ async def async_setup_entry(
 
     session = aiohttp_client.async_get_clientsession(hass)
     client = APIClient(session, language, email, password)
+    setup_complete = False
     try:
-        authenticated = await client.authenticate()
-    except InvalidCredentialsError as err:
-        raise ConfigEntryAuthFailed from err
-    except (aiohttp.ClientError, TimeoutError) as err:
-        raise ConfigEntryNotReady("Unable to contact DeLonghi") from err
-    if not authenticated:
-        raise ConfigEntryNotReady("Unable to authenticate with DeLonghi")
-    entry.runtime_data = client
+        try:
+            authenticated = await client.authenticate()
+            if not authenticated:
+                raise ConfigEntryNotReady("Unable to authenticate with DeLonghi")
+            await client.get_first_device()
+            # Platforms need these properties to construct device information. Read
+            # them while setup can still request a retry, before adding any entities.
+            # Their subsequent reads share the client's normal property cache.
+            await client.get_properties()
+        except InvalidCredentialsError as err:
+            raise ConfigEntryAuthFailed from err
+        except NoDevicesError as err:
+            raise ConfigEntryNotReady(
+                "No devices found in the DeLonghi account"
+            ) from err
+        except (aiohttp.ClientError, TimeoutError, TransientCloudError) as err:
+            raise ConfigEntryNotReady("Unable to contact DeLonghi") from err
 
-    def start_reauth() -> None:
-        """Request reauthentication only for the active runtime client."""
-        if entry.state is ConfigEntryState.LOADED and entry.runtime_data is client:
-            entry.async_start_reauth(hass, data={RUNTIME_REAUTH_ID: client.reauth_id})
+        entry.runtime_data = client
 
-    client.on_invalid_credentials = start_reauth
+        def start_reauth() -> None:
+            """Request reauthentication only for the active runtime client."""
+            if entry.state is ConfigEntryState.LOADED and entry.runtime_data is client:
+                entry.async_start_reauth(
+                    hass, data={RUNTIME_REAUTH_ID: client.reauth_id}
+                )
 
-    await hass.config_entries.async_forward_entry_setups(entry, _PLATFORMS)
-    if client.invalid_credentials:
-        # Authentication can also fail while platforms perform their first reads.
-        await hass.config_entries.async_unload_platforms(entry, _PLATFORMS)
-        await client.async_shutdown()
-        raise ConfigEntryAuthFailed
-    _remove_retired_buttons(hass, entry)
-    entry.async_on_unload(entry.add_update_listener(_async_update_options))
-
-    return True
+        client.on_invalid_credentials = start_reauth
+        await hass.config_entries.async_forward_entry_setups(entry, _PLATFORMS)
+        if client.invalid_credentials:
+            # Authentication can also fail while platforms perform their first reads.
+            await hass.config_entries.async_unload_platforms(entry, _PLATFORMS)
+            raise ConfigEntryAuthFailed
+        _remove_retired_buttons(hass, entry)
+        entry.async_on_unload(entry.add_update_listener(_async_update_options))
+        setup_complete = True
+        return True
+    finally:
+        if not setup_complete:
+            await client.async_shutdown()
 
 
 def _remove_retired_buttons(hass: HomeAssistant, entry: ConfigEntry) -> None:

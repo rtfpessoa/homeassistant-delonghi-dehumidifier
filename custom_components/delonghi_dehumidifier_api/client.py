@@ -9,6 +9,7 @@ import urllib.parse
 from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
+from http import HTTPStatus
 from typing import Final
 from uuid import uuid4
 
@@ -330,10 +331,33 @@ class FilterStatus(Enum):
 FILTER_STATUS_BY_VALUE: Final = {status.value: status for status in FilterStatus}
 
 _LOGGER = logging.getLogger(__name__)
+_HTTP_SERVER_ERROR_LIMIT = 600
 
 
 class InvalidCredentialsError(HomeAssistantError):
     """The provider rejected the account credentials."""
+
+
+class TransientCloudError(HomeAssistantError):
+    """The cloud service is temporarily unavailable or rate limiting requests."""
+
+
+def _raise_for_transient_response(response: aiohttp.ClientResponse) -> None:
+    """Release and classify a temporary response without exposing its contents."""
+    if (
+        response.status == HTTPStatus.TOO_MANY_REQUESTS
+        or HTTPStatus.INTERNAL_SERVER_ERROR
+        <= response.status
+        < _HTTP_SERVER_ERROR_LIMIT
+    ):
+        response.release()
+        raise TransientCloudError(
+            f"DeLonghi API request failed (HTTP {response.status})"
+        )
+
+
+class NoDevicesError(HomeAssistantError):
+    """The account has no associated devices."""
 
 
 class InvalidNumericStateError(HomeAssistantError):
@@ -434,7 +458,14 @@ class APIClient:
 
         """
         properties = await self.get_properties()
-        return properties[0].get("product_name")
+        product_name = (
+            properties[0].get("product_name")
+            if properties and isinstance(properties[0], dict)
+            else None
+        )
+        if isinstance(product_name, str) and product_name.strip():
+            return product_name
+        return "DeLonghi Dehumidifier"
 
     async def get_appliance_model(self) -> str:
         """Retrieve the appliance model.
@@ -793,6 +824,7 @@ class APIClient:
         }
         body = {"user": {"refresh_token": self.refresh_token}}
         async with self.session.post(url, headers=headers, json=body) as response:
+            _raise_for_transient_response(response)
             if response.status == 200:
                 data = await response.json()
                 self.refresh_token = data["refresh_token"]
@@ -843,6 +875,7 @@ class APIClient:
         response = await self.session.get(
             url, headers=headers, params=params, allow_redirects=False
         )
+        _raise_for_transient_response(response)
         location = response.headers.get("Location")
         context = await self.get_query_param(location, "context")
 
@@ -858,6 +891,7 @@ class APIClient:
             "format": "json",
         }
         response = await self.session.get(url, headers=headers, params=params)
+        _raise_for_transient_response(response)
         response = await response.text()
         response = json.loads(response)
 
@@ -933,6 +967,7 @@ class APIClient:
             "format": "json",
         }
         response = await self.session.post(url, headers=headers, data=data)
+        _raise_for_transient_response(response)
         login_token = _login_token_from_response(await response.text())
 
         # Step 4: Get user info
@@ -951,6 +986,7 @@ class APIClient:
             "format": "json",
         }
         response = await self.session.post(url, headers=headers, data=data)
+        _raise_for_transient_response(response)
         response = await response.text()
         response = json.loads(response)
 
@@ -971,6 +1007,7 @@ class APIClient:
             "signatureTimestamp": user_signature_timestamp,
         }
         response = await self.session.get(url, headers=headers, params=params)
+        _raise_for_transient_response(response)
         response = await response.text()
 
         signature = response.split("const consentObj2Sig = '")[1].split("';")[0]
@@ -997,9 +1034,14 @@ class APIClient:
         response = await self.session.get(
             url, headers=headers, params=params, allow_redirects=False
         )
+        _raise_for_transient_response(response)
         location = response.headers.get("Location")
         code = await self.get_query_param(location, "code")
 
+        return await self._exchange_authorization_code(code)
+
+    async def _exchange_authorization_code(self, code: str | None) -> str:
+        """Exchange the authorization code for IDP and Ayla access tokens."""
         # Step 7: Get IDP access token
         url = f"https://fidm.eu1.gigya.com/oidc/op/v1.0/{API_KEY}/token"
         headers = {
@@ -1013,6 +1055,7 @@ class APIClient:
             "redirect_uri": "https://google.it",
         }
         response = await self.session.post(url, headers=headers, data=data)
+        _raise_for_transient_response(response)
         response = await response.text()
         response = json.loads(response)
 
@@ -1027,6 +1070,7 @@ class APIClient:
             "token": idp_token,
         }
         response = await self.session.post(url, headers=headers, data=data)
+        _raise_for_transient_response(response)
         response = await response.text()
         response = json.loads(response)
 
@@ -1039,6 +1083,7 @@ class APIClient:
     @staticmethod
     async def _read_response(response: aiohttp.ClientResponse) -> dict:
         """Decode a successful response or report its HTTP status."""
+        _raise_for_transient_response(response)
         if not 200 <= response.status < 300:
             raise HomeAssistantError(
                 f"DeLonghi API request failed (HTTP {response.status})"
@@ -1061,7 +1106,9 @@ class APIClient:
             "User-Agent": API_USER_AGENT,
             "Authorization": f"auth_token {access_token}",
         }
-        async with self.session.get(url, headers=headers) as response:
+        async with self.session.get(
+            url, headers=headers, allow_redirects=False
+        ) as response:
             return await self._read_response(response)
 
     async def post_request(
@@ -1085,11 +1132,10 @@ class APIClient:
             "Authorization": f"auth_token {access_token}",
             "Content-Type": "application/json",
         }
-        options = (
-            {} if allow_redirects is None else {"allow_redirects": allow_redirects}
-        )
+        if allow_redirects:
+            raise ValueError("Device command redirects are not supported")
         async with self.session.post(
-            url, headers=headers, json=body, **options
+            url, headers=headers, json=body, allow_redirects=False
         ) as response:
             return await self._read_response(response)
 
@@ -1108,6 +1154,8 @@ class APIClient:
             return self.device_dsn
 
         devices = await self.get_request("apiv1/devices.json")
+        if isinstance(devices, list) and not devices:
+            raise NoDevicesError("No devices found in the DeLonghi account")
         self.device_dsn = devices[0]["device"]["dsn"]
 
         return self.device_dsn

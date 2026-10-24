@@ -45,7 +45,8 @@ class ProviderSession:
             raise aiohttp.ClientConnectionError("provider unreachable")
         if url.endswith("/authorize"):
             return SimpleNamespace(
-                headers={"Location": "https://example.invalid/?context=test"}
+                status=302,
+                headers={"Location": "https://example.invalid/?context=test"},
             )
         if url.endswith("/socialize.getIDs"):
             return self.json_response(
@@ -53,11 +54,12 @@ class ProviderSession:
             )
         if url.endswith("/OIDCConsentPage.php"):
             return SimpleNamespace(
-                text=AsyncMock(return_value="const consentObj2Sig = 'signature';")
+                status=200,
+                text=AsyncMock(return_value="const consentObj2Sig = 'signature';"),
             )
         if url.endswith("/authorize/continue"):
             return SimpleNamespace(
-                headers={"Location": "https://example.invalid/?code=test"}
+                status=302, headers={"Location": "https://example.invalid/?code=test"}
             )
         raise AssertionError(url)
 
@@ -96,7 +98,9 @@ class ProviderSession:
 
     @staticmethod
     def json_response(data):
-        return SimpleNamespace(text=AsyncMock(return_value=json.dumps(data)))
+        return SimpleNamespace(
+            status=200, text=AsyncMock(return_value=json.dumps(data))
+        )
 
 
 @pytest.fixture

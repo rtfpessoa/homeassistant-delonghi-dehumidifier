@@ -140,6 +140,7 @@ async def test_reauth_error_translations_and_account_language(hass, failure, exp
     with patch(
         "custom_components.delonghi_dehumidifier_api.config_flow.APIClient"
     ) as client:
+        client.return_value.async_shutdown = AsyncMock()
         client.return_value.authenticate = AsyncMock(side_effect=failure)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], user_input={CONF_PASSWORD: "new-password"}

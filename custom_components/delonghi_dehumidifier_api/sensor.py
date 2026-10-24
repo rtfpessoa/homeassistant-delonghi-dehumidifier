@@ -232,7 +232,7 @@ class GenericSensor(AuthAvailabilityEntity, SensorEntity):
         self._attr_options = options
         self._poll_generation = 0
         self._completed_poll_generation = 0
-        _LOGGER.debug("Initialized %s", self._attr_unique_id)
+        _LOGGER.debug("Initialized sensor")
 
     async def async_added_to_hass(self) -> None:
         """Call when the entity is added to Home Assistant."""
@@ -261,13 +261,7 @@ class GenericSensor(AuthAvailabilityEntity, SensorEntity):
             return
         self._attr_native_value = value
         self._attr_available = True
-        _LOGGER.debug(
-            "Updated %s with %s",
-            self._attr_unique_id,
-            {
-                "value": self._attr_native_value,
-            },
-        )
+        _LOGGER.debug("Updated sensor")
 
 
 def get_filter_life_days(

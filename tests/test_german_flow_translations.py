@@ -95,6 +95,7 @@ async def test_german_reauth_uses_effective_email_and_account_language(hass):
     with patch(
         "custom_components.delonghi_dehumidifier_api.config_flow.APIClient"
     ) as client:
+        client.return_value.async_shutdown = AsyncMock()
         client.return_value.authenticate = AsyncMock(
             side_effect=InvalidCredentialsError("invalid credentials")
         )

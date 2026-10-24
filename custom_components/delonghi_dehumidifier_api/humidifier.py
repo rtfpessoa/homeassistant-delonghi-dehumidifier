@@ -148,7 +148,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         self._pending_refresh_timer: asyncio.TimerHandle | None = None
         self._pending_refresh_remaining = 0
         self._pending_generation = 0
-        _LOGGER.debug("Initialized %s", self._attr_unique_id)
+        _LOGGER.debug("Initialized humidifier")
 
     async def async_added_to_hass(self) -> None:
         self._removed = False
@@ -186,7 +186,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
 
     async def _async_update(self, *, after_action: bool) -> None:
         """Handle the event when the device status changes."""
-        _LOGGER.debug("Updating %s", self._attr_unique_id)
+        _LOGGER.debug("Updating humidifier")
         self._poll_generation += 1
         generation = self._poll_generation
         command_generation = self.client.humidifier_commands.generation
@@ -232,16 +232,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         self._attr_mode = mode
         self._attr_available = True
         self._record_mode_activity(mode)
-        _LOGGER.debug(
-            "Updated %s with %s",
-            self._attr_unique_id,
-            {
-                "mode": self._attr_mode,
-                "target_humidity": self._attr_target_humidity,
-                "current_humidity": self._attr_current_humidity,
-                "is_on": self._attr_is_on,
-            },
-        )
+        _LOGGER.debug("Updated humidifier")
 
     def _record_mode_activity(self, mode: str | None) -> None:
         """Record changes involving Real Feel only after an accepted cloud read."""
@@ -265,30 +256,28 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         )
         key = f"component.{DOMAIN}.common.mode_activity_{mode.lower()}"
         if message := translations.get(key):
-            async_log_entry(
-                self.hass, self.name or "De'Longhi", message, entity_id=self.entity_id
-            )
+            async_log_entry(self.hass, "De'Longhi", message, entity_id=self.entity_id)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the entity on."""
-        _LOGGER.debug("Turning on %s", self._attr_unique_id)
+        _LOGGER.debug("Turning on humidifier")
         await self.client.humidifier_commands.run(
             lambda: self.client.set_status(Status.ON)
         )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the entity off."""
-        _LOGGER.debug("Turning off %s", self._attr_unique_id)
+        _LOGGER.debug("Turning off humidifier")
         await self.client.humidifier_commands.run(
             lambda: self.client.set_status(Status.OFF)
         )
 
     async def async_set_mode(self, mode: str) -> None:
         """Set new target mode."""
-        _LOGGER.debug("Setting mode %s mode to %s", self._attr_unique_id, mode)
+        _LOGGER.debug("Setting humidifier mode")
         target = MODE_BY_NAME.get(mode)
         if target is None:
-            raise ServiceValidationError(f"Unsupported dehumidifier mode: {mode!r}")
+            raise ServiceValidationError("Unsupported dehumidifier mode")
         tested_device = False
         source_mode: str | None = None
         lifetime = self._lifetime_generation
@@ -510,7 +499,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
 
     async def async_set_humidity(self, humidity: int) -> None:
         """Set new target humidity."""
-        _LOGGER.debug("Setting humidity %s mode to %s", self._attr_unique_id, humidity)
+        _LOGGER.debug("Setting target humidity")
         await self.client.humidifier_commands.run(
             lambda: self.client.set_humidity(humidity)
         )
