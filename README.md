@@ -39,7 +39,10 @@ The automated tests cover Home Assistant 2025.2.4 and 2026.10.2 with a mocked cl
 Home Assistant shows the installed integration's manifest version on its page
 under **Settings > Devices & services**. Without a published GitHub release,
 HACS tracks the default branch and identifies updates by commit hash. Publishing
-a GitHub release is a separate step from changing the manifest version.
+a GitHub release is a separate step from changing the manifest version. Branch
+snapshots can share the same manifest version, so include the installed commit
+hash when reporting an issue with a branch installation. See the
+[release notes](RELEASE_NOTES.md) for upgrade precautions.
 
 ### Configuring
 
@@ -67,6 +70,10 @@ Home Assistant may reassociate existing entities with that owner. Historical
 associations are retained, and deleting an entry can trigger Home Assistant's
 own cleanup of its entities. A device already bound to an entry cannot be
 silently replaced; restore access or add a separate entry for another device.
+
+If platform forwarding or cleanup fails or is interrupted, restart Home
+Assistant before loading, repairing or adding the affected device again.
+Entities left behind by a failed cleanup may be unavailable.
 
 Before upgrading, persistently disable every entry of this integration, restart
 Home Assistant, and verify that the entries remain disabled. Then retain a full

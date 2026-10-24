@@ -13,9 +13,9 @@ Issues not containing the minimum requirements will be closed:
 -->
 
 ## Version of the custom_component
-<!-- If you are not using the newest version, download and try that before opening an issue
-If you are unsure about the version check the const.py file.
--->
+<!-- Include the version shown on the integration page in Home Assistant.
+If installed from a branch in HACS, also include its installed commit hash;
+different branch snapshots can have the same manifest version. -->
 
 ## Configuration
 
