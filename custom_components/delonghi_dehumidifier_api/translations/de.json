@@ -154,11 +154,10 @@
   "issues": {
     "device_binding": {
       "title": "Gerätezuordnung überprüfen",
-      "description": "Die Gerätezuordnung dieser Integration muss überprüft werden. Vorhandene Geräte und Verlauf bleiben erhalten.",
       "fix_flow": {
         "step": {
           "init": {
-            "description": "Bisher zugeordnete Geräte: {devices}. Wähle das passende Gerät und prüfe seine Zuordnung. Falls du die Zuordnung nicht kennst, brich ab. Eine bestehende Bindung kann nicht geändert werden.",
+            "description": "Die Gerätezuordnung dieser Integration muss überprüft werden. Vorhandene Geräte und Verlauf bleiben erhalten. Bisher zugeordnete Geräte: {devices}. Wähle das passende Gerät und prüfe seine Zuordnung. Falls du die Zuordnung nicht kennst, brich ab. Eine bestehende Bindung kann nicht geändert werden.",
             "data": {
               "device_dsn": "Gerät",
               "discover_other_devices": "Weitere Geräte im Konto suchen"

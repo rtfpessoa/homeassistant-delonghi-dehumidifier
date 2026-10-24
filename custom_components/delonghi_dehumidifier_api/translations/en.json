@@ -154,11 +154,10 @@
   "issues": {
     "device_binding": {
       "title": "Review device binding",
-      "description": "This integration needs an explicit device binding. Existing devices and history are retained.",
       "fix_flow": {
         "step": {
           "init": {
-            "description": "Previously associated devices: {devices}. Select the matching device and verify its association. If you cannot identify it, stop; list order does not identify a device. An existing binding cannot be changed.",
+            "description": "This integration needs an explicit device binding. Existing devices and history are retained. Previously associated devices: {devices}. Select the matching device and verify its association. If you cannot identify it, stop; list order does not identify a device. An existing binding cannot be changed.",
             "data": {
               "device_dsn": "Device",
               "discover_other_devices": "Find other devices in this account"

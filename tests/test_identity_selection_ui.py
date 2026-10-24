@@ -1,5 +1,7 @@
 """Exercise device selection and recovery at Home Assistant's flow boundary."""
 
+import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -320,6 +322,51 @@ async def test_discovery_credential_consent_translation(hass, language):
     key = f"component.{DOMAIN}.issues.device_binding.fix_flow.step.owner"
     assert translations[f"{key}.description"]
     assert translations[f"{key}.data.use_discovery_credentials"]
+
+
+@pytest.mark.parametrize(
+    "name", ["strings.json", "translations/en.json", "translations/de.json"]
+)
+def test_fixable_repair_translation_has_no_issue_description(name):
+    path = Path(__file__).resolve().parents[1] / "custom_components" / DOMAIN / name
+    issue = json.loads(path.read_text(encoding="utf-8"))["issues"]["device_binding"]
+    assert "description" not in issue
+    assert issue["fix_flow"]["step"]["init"]["description"]
+
+
+@pytest.mark.parametrize(
+    ("language", "introduction"),
+    [
+        ("en", "Existing devices and history are retained."),
+        ("de", "Vorhandene Geräte und Verlauf bleiben erhalten."),
+    ],
+)
+async def test_repair_intro_translation_matches_actual_form(
+    hass, language, introduction
+):
+    entry = MockConfigEntry(domain=DOMAIN, data=DATA, version=1)
+    entry.add_to_hass(hass)
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "private-a")},
+        name="Living room",
+    )
+    assert await async_setup_component(hass, DOMAIN, {})
+    create_binding_issue(hass, entry)
+    assert await async_setup_component(hass, "repairs", {})
+    manager = repairs_flow_manager(hass)
+    form = await manager.async_init(
+        DOMAIN, data={"issue_id": f"device_binding_{entry.entry_id}"}
+    )
+    assert form["step_id"] == "init"
+    assert form["description_placeholders"] == {"devices": "Living room"}
+    translations = await async_get_translations(hass, language, "issues", [DOMAIN])
+    key = f"component.{DOMAIN}.issues.device_binding"
+    assert translations[f"{key}.title"]
+    description = translations[f"{key}.fix_flow.step.init.description"]
+    assert introduction in description
+    assert "Living room" in description.format(**form["description_placeholders"])
+    manager.async_abort(form["flow_id"])
 
 
 async def test_repair_can_discover_other_devices_without_losing_registry_labels(hass):
