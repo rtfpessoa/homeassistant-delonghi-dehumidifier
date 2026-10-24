@@ -9,7 +9,6 @@ import pytest
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
 from custom_components.delonghi_dehumidifier_api.const import (
@@ -19,6 +18,7 @@ from custom_components.delonghi_dehumidifier_api.const import (
 from custom_components.delonghi_dehumidifier_api.diagnostics import (
     async_get_config_entry_diagnostics,
 )
+from tests.identity_helpers import bound_entry as MockConfigEntry
 
 SECRETS = (
     "diagnostics-private@example.com",
@@ -73,6 +73,7 @@ async def diagnostics_entry(hass):
         for name, value in values.items()
     ]
     entry = MockConfigEntry(
+        dsn=SECRETS[3],
         domain=DOMAIN,
         data={CONF_EMAIL: SECRETS[0], CONF_PASSWORD: SECRETS[1], CONF_LANGUAGE: "en"},
     )
@@ -80,6 +81,7 @@ async def diagnostics_entry(hass):
     with (
         patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
         patch.object(APIClient, "get_first_device", AsyncMock(return_value=SECRETS[3])),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=[SECRETS[3]])),
         patch.object(APIClient, "get_request", AsyncMock(return_value=records)) as get,
         patch.object(APIClient, "post_request", new_callable=AsyncMock) as post,
     ):

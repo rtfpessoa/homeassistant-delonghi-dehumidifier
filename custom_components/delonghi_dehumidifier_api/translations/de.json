@@ -16,16 +16,25 @@
         "data": {
           "password": "Passwort"
         }
+      },
+      "select_device": {
+        "description": "Wähle das gewünschte Gerät. Kennungen sind vertraulich; prüfe bei mehreren Geräten die Zuordnung vor der Auswahl. Die Reihenfolge zeigt die Zuordnung nicht an.",
+        "data": {
+          "device_dsn": "Gerät"
+        }
       }
     },
     "error": {
       "cannot_connect": "Die Verbindung zu De'Longhi konnte nicht hergestellt werden. Bitte versuche es erneut.",
       "invalid_auth": "Die Anmeldung ist fehlgeschlagen. Prüfe deine E-Mail-Adresse und dein Passwort oder versuche es später erneut.",
       "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut.",
-      "no_devices": "In diesem De'Longhi-Konto wurden keine Geräte gefunden. Füge zuerst ein Gerät in der De'Longhi-App hinzu."
+      "no_devices": "In diesem De'Longhi-Konto wurden keine Geräte gefunden. Füge zuerst ein Gerät in der De'Longhi-App hinzu.",
+      "device_not_available": "Das ausgewählte Gerät ist in diesem Konto nicht verfügbar.",
+      "ownership_unavailable": "Gerätezuordnungen konnten nicht gelesen oder gespeichert werden. Stelle eine vollständige Home-Assistant-Sicherung wieder her."
     },
     "abort": {
       "already_configured": "Dieses Gerät ist bereits eingerichtet.",
+      "restart_required": "Starte Home Assistant neu, bevor du dieses Gerät erneut einrichtest.",
       "reauth_successful": "Die erneute Anmeldung war erfolgreich.",
       "reauth_settings_changed": "Die Integrationseinstellungen wurden geändert. Bitte starte den Anmeldevorgang erneut.",
       "reauth_cancelled": "Die erneute Anmeldung wurde abgebrochen."
@@ -48,7 +57,11 @@
       "invalid_auth": "Die Anmeldung ist fehlgeschlagen. Prüfe deine E-Mail-Adresse und dein Passwort oder versuche es später erneut.",
       "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut.",
       "no_devices": "In diesem De'Longhi-Konto wurden keine Geräte gefunden. Füge zuerst ein Gerät in der De'Longhi-App hinzu.",
-      "cannot_connect": "Die Verbindung zu De'Longhi konnte nicht hergestellt werden. Bitte versuche es erneut."
+      "cannot_connect": "Die Verbindung zu De'Longhi konnte nicht hergestellt werden. Bitte versuche es erneut.",
+      "device_not_available": "Das ausgewählte Gerät ist in diesem Konto nicht verfügbar."
+    },
+    "abort": {
+      "reauth_settings_changed": "Die Integrationseinstellungen wurden geändert. Bitte starte die Optionen erneut."
     }
   },
   "entity": {
@@ -137,5 +150,56 @@
     "mode_activity_dry_clothes": "Gemeldeter Modus: Wäsche trocknen",
     "mode_activity_purifier": "Gemeldeter Modus: Luftreinigung",
     "mode_activity_real_feel": "Gemeldeter Modus: Real Feel"
+  },
+  "issues": {
+    "device_binding": {
+      "title": "Gerätezuordnung überprüfen",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "description": "Die Gerätezuordnung dieser Integration muss überprüft werden. Vorhandene Geräte und Verlauf bleiben erhalten. Bisher zugeordnete Geräte: {devices}. Wähle das passende Gerät und prüfe seine Zuordnung. Falls du die Zuordnung nicht kennst, brich ab. Eine bestehende Bindung kann nicht geändert werden.",
+            "data": {
+              "device_dsn": "Gerät",
+              "discover_other_devices": "Weitere Geräte im Konto suchen"
+            }
+          },
+          "owner": {
+            "description": "Wähle den Eintrag, der dieses Gerät verwalten soll. Leere Kontofelder verwenden die gespeicherten Daten dieses Eintrags. Wähle, falls angezeigt, die Übernahme der Zugangsdaten aus der Suche; hier eingegebene Felder haben Vorrang. Neue Daten werden erst nach erfolgreicher Prüfung gespeichert.",
+            "data": {
+              "owner": "Besitzer",
+              "email": "Neue Konto-E-Mail (optional)",
+              "language": "Neue Kontosprache (optional)",
+              "password": "Neues Passwort (optional)",
+              "use_discovery_credentials": "Bei der Suche eingegebene Zugangsdaten für diesen Eintrag verwenden"
+            }
+          },
+          "confirm": {
+            "description": "Bestätige die Zuordnung. Home Assistant kann vorhandene Entitäten dem Gewinner erneut zuordnen; ihre Kennungen und der Verlauf bleiben erhalten. Andere Zuordnungen bleiben bestehen. Das Löschen eines Eintrags kann dessen Entitäten durch Home Assistant entfernen."
+          },
+          "discover": {
+            "description": "Die Gerätesuche ist fehlgeschlagen. Lasse die Felder leer, um die gespeicherten Zugangsdaten erneut zu verwenden, oder gib Ersatzdaten ein.",
+            "data": {
+              "email": "Neue Konto-E-Mail-Adresse (optional)",
+              "language": "Neue Kontosprache (optional)",
+              "password": "Neues Passwort (optional)"
+            }
+          }
+        },
+        "error": {
+          "invalid_auth": "Anmeldung fehlgeschlagen.",
+          "cannot_connect": "Verbindung zu De'Longhi fehlgeschlagen. Bitte versuche es erneut.",
+          "no_devices": "Keine zugeordneten Geräte gefunden.",
+          "device_not_available": "Das ausgewählte Gerät ist in diesem Konto nicht verfügbar.",
+          "unknown": "Ein unerwarteter Fehler ist aufgetreten.",
+          "ownership_unavailable": "Gerätezuordnungen konnten nicht gelesen oder gespeichert werden. Stelle eine vollständige Home-Assistant-Sicherung wieder her."
+        },
+        "abort": {
+          "entry_removed": "Der Eintrag wurde entfernt.",
+          "settings_changed": "Die Einstellungen wurden geändert. Starte die Reparatur erneut.",
+          "already_bound": "Das Gerät ist bereits zugeordnet.",
+          "restart_required": "Starte Home Assistant neu, bevor du die Gerätezuordnung reparierst."
+        }
+      }
+    }
   }
 }

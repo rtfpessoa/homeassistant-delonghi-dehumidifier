@@ -3,27 +3,6 @@
 ---
 {% endif %}
 
-{% if installed %}
-## Changes as compared to your installed version:
-
-{% if (version_installed.split(".")[0] | int) < 1 %}
-{% if (version_installed.split(".")[1] | int) < 6 %}
-
-## Breaking Changes
-- N/A
-{% if (version_installed.split(".")[1] | int) < 8 %}
-{% endif %}
-
-## Major changes
-- TODO
-
-## Bug fixes
-- TODO
-
-{% endif %}
-{% endif %}
-{% endif %}
-
 [![GitHub Release][releases-shield]][releases]
 [![GitHub Activity][commits-shield]][commits]
 [![License][license-shield]][license]

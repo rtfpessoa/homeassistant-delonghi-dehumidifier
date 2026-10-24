@@ -11,12 +11,13 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
 from homeassistant.data_entry_flow import UnknownFlow
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from tests.identity_helpers import bound_entry as MockConfigEntry
 
 DATA = {
+    "device_dsn": "test-dsn",
     CONF_EMAIL: "original@example.com",
     CONF_LANGUAGE: "en",
     CONF_PASSWORD: "bad-password",
@@ -132,6 +133,7 @@ def provider():
             return_value=session,
         ),
         patch.object(APIClient, "get_first_device", AsyncMock(return_value="test-dsn")),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["test-dsn"])),
         patch.object(APIClient, "get_properties", AsyncMock(return_value=properties)),
     ):
         yield session

@@ -7,6 +7,7 @@ import logging
 import time
 import urllib.parse
 from collections.abc import Callable
+from contextlib import nullcontext
 from datetime import datetime
 from enum import Enum
 from http import HTTPStatus
@@ -356,6 +357,10 @@ def _raise_for_transient_response(response: aiohttp.ClientResponse) -> None:
         )
 
 
+class InvalidDeviceListError(HomeAssistantError):
+    """The provider returned an unusable device list."""
+
+
 class NoDevicesError(HomeAssistantError):
     """The account has no associated devices."""
 
@@ -378,6 +383,25 @@ def parse_integer_state(value: object) -> int | None:
         except ValueError:
             pass
     raise InvalidNumericStateError("Invalid numeric cloud state") from None
+
+
+class DeviceNotAvailableError(HomeAssistantError):
+    """The selected device is not associated with this account."""
+
+
+class DeviceNotSelectedError(HomeAssistantError):
+    """No verified device has been selected for this client."""
+
+
+def usable_dsn(dsn: object) -> bool:
+    """Reject identities that cannot be safely used as a single URL path segment."""
+    if not isinstance(dsn, str) or not dsn or dsn in {".", ".."} or dsn != dsn.strip():
+        return False
+    try:
+        dsn.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return not any(ord(char) < 32 or ord(char) == 127 for char in dsn)
 
 
 def _login_token_from_response(response: str) -> str:
@@ -414,6 +438,7 @@ class APIClient:
         self.device_properties_timestamp = 0.0
         self.device_properties_request_started = None
         self.device_dsn = None
+        self.device_write_guard = None
         self.action_refresh = ActionRefresh(
             self.invalidate_properties, self._can_refresh_after_action
         )
@@ -623,7 +648,7 @@ class APIClient:
         - 1 On
         - 2 Off
         """
-        device_dsn = await self.get_first_device()
+        device_dsn = urllib.parse.quote(await self.get_first_device(), safe="")
         return await self.post_request(
             f"apiv1/dsns/{device_dsn}/properties/set_status/datapoints.json",
             {"datapoint": {"value": status.value}},
@@ -634,7 +659,7 @@ class APIClient:
 
         - [0,100] %
         """
-        device_dsn = await self.get_first_device()
+        device_dsn = urllib.parse.quote(await self.get_first_device(), safe="")
         return await self.post_request(
             f"apiv1/dsns/{device_dsn}/properties/humidity_setpoint/datapoints.json",
             {"datapoint": {"value": value}},
@@ -648,7 +673,7 @@ class APIClient:
         - 3   Air purifier
         - 100 Real Feel
         """
-        device_dsn = await self.get_first_device()
+        device_dsn = urllib.parse.quote(await self.get_first_device(), safe="")
 
         if mode == Mode.REAL_FEEL:
             return await self.post_request(
@@ -663,7 +688,7 @@ class APIClient:
 
     async def request_exit_real_feel(self) -> dict:
         """Send the tested Real Feel exit request without following redirects."""
-        device_dsn = await self.get_first_device()
+        device_dsn = urllib.parse.quote(await self.get_first_device(), safe="")
         return await self.post_request(
             f"apiv1/dsns/{device_dsn}/properties/activate_realfeel/datapoints.json",
             {"datapoint": {"value": REAL_FEEL_DEACTIVATION_PAYLOAD}},
@@ -672,7 +697,7 @@ class APIClient:
 
     async def request_enter_real_feel(self) -> dict:
         """Send one Real Feel activation request without following redirects."""
-        device_dsn = await self.get_first_device()
+        device_dsn = urllib.parse.quote(await self.get_first_device(), safe="")
         return await self.post_request(
             f"apiv1/dsns/{device_dsn}/properties/activate_realfeel/datapoints.json",
             {"datapoint": {"value": REAL_FEEL_ACTIVATION_PAYLOAD}},
@@ -685,7 +710,7 @@ class APIClient:
         - 0 Off
         - 1 On
         """
-        device_dsn = await self.get_first_device()
+        device_dsn = urllib.parse.quote(await self.get_first_device(), safe="")
         return await self.post_request(
             f"apiv1/dsns/{device_dsn}/properties/swing/datapoints.json",
             {"datapoint": {"value": status.value}},
@@ -697,7 +722,7 @@ class APIClient:
         - 0 Off
         - 1 On
         """
-        device_dsn = await self.get_first_device()
+        device_dsn = urllib.parse.quote(await self.get_first_device(), safe="")
         return await self.post_request(
             f"apiv1/dsns/{device_dsn}/properties/set_eco/datapoints.json",
             {"datapoint": {"value": status.value}},
@@ -764,6 +789,11 @@ class APIClient:
             request.exception()
 
     @property
+    def closed(self) -> bool:
+        """Whether the runtime client has been shut down."""
+        return self._closed
+
+    @property
     def invalid_credentials(self) -> bool:
         """Whether the provider confirmed rejection of this client's credentials."""
         return self._invalid_credentials
@@ -771,7 +801,9 @@ class APIClient:
     def subscribe_auth_failure(
         self, listener: Callable[[], None]
     ) -> Callable[[], None]:
-        """Subscribe to credential rejection and return an unsubscribe callback."""
+        """Subscribe to availability changes and return an unsubscribe callback."""
+        if self._closed:
+            return lambda: None
         self._auth_listeners.add(listener)
         return lambda: self._auth_listeners.discard(listener)
 
@@ -783,7 +815,17 @@ class APIClient:
 
     async def async_shutdown(self) -> None:
         """Cancel pending requests when the associated entry is unloaded."""
-        self._closed = True
+        if not self._closed:
+            self._closed = True
+            listeners = tuple(self._auth_listeners)
+            self._auth_listeners.clear()
+            for listener in listeners:
+                try:
+                    listener()
+                except Exception as err:  # noqa: BLE001 - still notify others and close
+                    _LOGGER.warning(
+                        "Unable to update entity availability (%s)", type(err).__name__
+                    )
         self.action_refresh.close()
         self._properties_idle.set()
         self.on_invalid_credentials = None
@@ -1134,30 +1176,41 @@ class APIClient:
         }
         if allow_redirects:
             raise ValueError("Device command redirects are not supported")
-        async with self.session.post(
+        guard = self.device_write_guard() if self.device_write_guard else nullcontext()
+        async with guard, self.session.post(
             url, headers=headers, json=body, allow_redirects=False
         ) as response:
             return await self._read_response(response)
 
-    async def get_first_device(self) -> str:
-        """Retrieve the first device's DSN (Device Serial Number).
-
-        If the device DSN is already cached in the instance, it returns the cached value.
-        Otherwise, it makes a request to fetch the list of devices,
-        caches the DSN of the first device, and returns it.
-
-        Returns:
-          str: The DSN of the first device.
-
-        """
-        if self.device_dsn:
-            return self.device_dsn
-
+    async def get_devices(self) -> list[str]:
+        """Return validated associated device identities without selecting one."""
         devices = await self.get_request("apiv1/devices.json")
-        if isinstance(devices, list) and not devices:
-            raise NoDevicesError("No devices found in the DeLonghi account")
-        self.device_dsn = devices[0]["device"]["dsn"]
+        if not isinstance(devices, list):
+            raise InvalidDeviceListError("Invalid device list")
+        if not devices:
+            raise NoDevicesError("No associated devices")
+        dsns = []
+        for item in devices:
+            if not isinstance(item, dict) or not isinstance(item.get("device"), dict):
+                raise InvalidDeviceListError("Invalid device list")
+            dsn = item["device"].get("dsn")
+            if not usable_dsn(dsn) or dsn in dsns:
+                raise InvalidDeviceListError("Invalid device list")
+            dsns.append(dsn)
+        return dsns
 
+    async def verify_device(self, dsn: str) -> None:
+        """Select the requested identity only after verifying account membership."""
+        if self.device_dsn is not None and self.device_dsn != dsn:
+            raise DeviceNotAvailableError("Selected device cannot be changed")
+        if dsn not in await self.get_devices():
+            raise DeviceNotAvailableError("Selected device is not available")
+        self.device_dsn = dsn
+
+    async def get_first_device(self) -> str:
+        """Return the verified selection; never discover by list position."""
+        if self.device_dsn is None:
+            raise DeviceNotSelectedError("No device selected")
         return self.device_dsn
 
     async def get_property(self, name: str):
@@ -1267,7 +1320,7 @@ class APIClient:
 
     async def _fetch_properties(self, generation: int) -> list[dict]:
         """Fetch a snapshot once for all current readers."""
-        device_dsn = await self.get_first_device()
+        device_dsn = urllib.parse.quote(await self.get_first_device(), safe="")
         request_started = time.monotonic()
         device_properties = await self.get_request(
             f"apiv1/dsns/{device_dsn}/properties.json"

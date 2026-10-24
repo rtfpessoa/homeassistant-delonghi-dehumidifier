@@ -22,7 +22,15 @@ from custom_components.delonghi_dehumidifier_api.client import (
     TransientCloudError,
 )
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from custom_components.delonghi_dehumidifier_api.identity import (
+    CONF_DSN,
+    CONF_ENROLLMENT,
+    device_unique_id,
+    reload_journal,
+    reserve_enrollment,
+)
 from custom_components.delonghi_dehumidifier_api.utils import fetch_device_info
+from tests.identity_helpers import bound_entry
 
 
 class FakeRequest:
@@ -126,10 +134,59 @@ class FakeCloud:
 
 
 @pytest.mark.parametrize("status", [429, 503])
+@pytest.mark.parametrize("phase", ["authenticate", "discovery"])
+async def test_http_failure_retries_setup_and_recovers(hass, status, phase):
+    entry = bound_entry(
+        domain=DOMAIN,
+        dsn="device-a",
+        data={
+            CONF_LANGUAGE: "en",
+            CONF_EMAIL: "user@example.test",
+            CONF_PASSWORD: "secret",
+        },
+    )
+    entry.add_to_hass(hass)
+    original_data = dict(entry.data)
+    cloud = FakeCloud(status, phase)
+    with (
+        patch(
+            "custom_components.delonghi_dehumidifier_api.aiohttp_client.async_get_clientsession",
+            return_value=cloud,
+        ),
+        patch.object(
+            hass.config_entries, "async_forward_entry_setups", AsyncMock()
+        ) as forward,
+        patch.object(
+            hass.config_entries, "async_unload_platforms", AsyncMock(return_value=True)
+        ),
+    ):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        assert entry.state is ConfigEntryState.SETUP_RETRY
+        assert entry.data == original_data
+        cloud.failure.release.assert_called_once()
+        cloud.failure.text.assert_not_awaited()
+        cloud.failure.json.assert_not_awaited()
+        forward.assert_not_awaited()
+        assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+        cloud.recovered = True
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=2))
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert entry.state is ConfigEntryState.LOADED
+        assert entry.data == original_data
+        forward.assert_awaited_once()
+        assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+        assert await hass.config_entries.async_unload(entry.entry_id)
+    assert cloud.requests and not any(
+        method == "POST" and "/dsns/" in url for method, url in cloud.requests
+    )
+
+
+@pytest.mark.parametrize("status", [429, 503])
 async def test_property_http_failure_retries_before_adding_entities(hass, status):
     """A transient properties response retries the entry, then loads all platforms."""
-    entry = MockConfigEntry(
+    entry = bound_entry(
         domain=DOMAIN,
+        dsn="device-a",
         data={
             CONF_LANGUAGE: "en",
             CONF_EMAIL: "user@example.test",
@@ -173,8 +230,9 @@ async def test_property_http_failure_retries_before_adding_entities(hass, status
 async def test_platform_retry_after_initial_properties_expire(hass):
     """An outage after prefetch still retries platforms instead of losing them."""
     await hass.async_start()
-    entry = MockConfigEntry(
+    entry = bound_entry(
         domain=DOMAIN,
+        dsn="device-a",
         data={
             CONF_LANGUAGE: "en",
             CONF_EMAIL: "user@example.test",
@@ -221,6 +279,45 @@ async def test_platform_retry_after_initial_properties_expire(hass):
     )
 
 
+async def test_new_device_claim_survives_initial_property_failure(hass):
+    """A transient outage after durable enrollment does not lose device ownership."""
+    token = reserve_enrollment(hass, "device-a")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        unique_id=device_unique_id("device-a"),
+        data={
+            CONF_LANGUAGE: "en",
+            CONF_EMAIL: "user@example.test",
+            CONF_PASSWORD: "secret",
+            CONF_DSN: "device-a",
+            CONF_ENROLLMENT: token,
+        },
+    )
+    entry.add_to_hass(hass)
+    cloud = FakeCloud(503, "properties")
+    with patch(
+        "custom_components.delonghi_dehumidifier_api.aiohttp_client.async_get_clientsession",
+        return_value=cloud,
+    ):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        assert entry.state is ConfigEntryState.SETUP_RETRY
+        assert CONF_ENROLLMENT not in entry.data
+        assert (await reload_journal(hass))[device_unique_id("device-a")]["owner"] == (
+            entry.entry_id
+        )
+        assert not er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+        cloud.recovered = True
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=2))
+        await hass.async_block_till_done(wait_background_tasks=True)
+        assert entry.state is ConfigEntryState.LOADED
+        assert entry.runtime_data.device_dsn == "device-a"
+        assert await hass.config_entries.async_unload(entry.entry_id)
+    assert not any(
+        method == "POST" and "/dsns/" in url for method, url in cloud.requests
+    )
+
+
 @pytest.mark.parametrize(
     "error",
     [
@@ -255,9 +352,10 @@ async def test_platform_auth_failure_is_not_converted_to_retry():
 async def test_initial_property_failure_cleans_up_and_preserves_auth(
     hass, error, state, reauth
 ):
-    """Property prefetch must close the failed client and classify errors correctly."""
-    entry = MockConfigEntry(
+    """Property prefetch closes the failed client and classifies errors correctly."""
+    entry = bound_entry(
         domain=DOMAIN,
+        dsn="device-a",
         data={
             CONF_LANGUAGE: "en",
             CONF_EMAIL: "user@example.test",
@@ -274,8 +372,9 @@ async def test_initial_property_failure_cleans_up_and_preserves_auth(
 
     with (
         patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
-        patch.object(APIClient, "get_first_device", AsyncMock(return_value="device-a")),
-        patch.object(APIClient, "get_properties", AsyncMock(side_effect=error)),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["device-a"])),
+        patch.object(APIClient, "get_properties", AsyncMock(side_effect=error)) as read,
+        patch.object(APIClient, "post_request", AsyncMock()) as post,
         patch.object(APIClient, "async_shutdown", close),
         patch.object(
             hass.config_entries, "async_forward_entry_setups", AsyncMock()
@@ -288,6 +387,8 @@ async def test_initial_property_failure_cleans_up_and_preserves_auth(
             bool(hass.config_entries.flow.async_progress_by_handler(DOMAIN)) is reauth
         )
         assert len(closed) == 1 and closed[0]._closed
+        read.assert_awaited_once()
+        post.assert_not_awaited()
         forward.assert_not_awaited()
         assert not er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
         if state is ConfigEntryState.SETUP_RETRY:

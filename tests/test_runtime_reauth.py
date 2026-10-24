@@ -11,13 +11,13 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_component import async_update_entity
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import (
     APIClient,
     InvalidCredentialsError,
 )
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from tests.identity_helpers import bound_entry as MockConfigEntry
 from tests.test_reauth import ProviderSession, get_reauth_form
 
 VALUES = {
@@ -86,6 +86,7 @@ async def loaded_entry(hass):
             return_value=session,
         ),
         patch.object(APIClient, "get_first_device", AsyncMock(return_value="test-dsn")),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["test-dsn"])),
         patch.object(APIClient, "get_properties", AsyncMock(return_value=PROPERTIES)),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -129,6 +130,7 @@ async def test_invalid_credentials_during_platform_setup_start_reauth(hass):
     with (
         patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
         patch.object(APIClient, "get_first_device", AsyncMock(return_value="test-dsn")),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["test-dsn"])),
         patch.object(
             APIClient,
             "get_new_access_token",
@@ -172,6 +174,7 @@ async def test_setup_auth_failure_unloads_previously_added_entities(hass):
         ),
         patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
         patch.object(APIClient, "get_first_device", AsyncMock(return_value="test-dsn")),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["test-dsn"])),
         patch.object(APIClient, "get_properties", AsyncMock(return_value=PROPERTIES)),
         patch.object(
             APIClient,
@@ -262,6 +265,7 @@ async def test_runtime_reauth_reloads_entry_and_recovers_entities(hass, loaded_e
             return_value=session,
         ),
         patch.object(APIClient, "get_first_device", AsyncMock(return_value="test-dsn")),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["test-dsn"])),
         patch.object(APIClient, "get_properties", AsyncMock(return_value=PROPERTIES)),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -380,6 +384,7 @@ async def test_old_client_failure_after_reauth_cannot_start_another_flow(
             return_value=session,
         ),
         patch.object(APIClient, "get_first_device", AsyncMock(return_value="test-dsn")),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["test-dsn"])),
         patch.object(APIClient, "get_properties", AsyncMock(return_value=PROPERTIES)),
     ):
         result = await hass.config_entries.flow.async_configure(
@@ -567,6 +572,9 @@ async def test_queued_old_client_reauth_does_not_start_after_reload(hass, loaded
             ),
             patch.object(
                 APIClient, "get_first_device", AsyncMock(return_value="test-dsn")
+            ),
+            patch.object(
+                APIClient, "get_devices", AsyncMock(return_value=["test-dsn"])
             ),
             patch.object(
                 APIClient, "get_properties", AsyncMock(return_value=PROPERTIES)

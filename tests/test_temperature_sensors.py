@@ -10,11 +10,11 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
 from custom_components.delonghi_dehumidifier_api.sensor import get_temperature_celsius
+from tests.identity_helpers import bound_entry as MockConfigEntry
 
 
 async def test_missing_temperature_is_not_converted():
@@ -68,6 +68,7 @@ async def test_temperature_sensors_use_tenths_of_celsius(
     client_mocks = {
         "authenticate": AsyncMock(return_value=True),
         "get_first_device": AsyncMock(return_value="test-dsn"),
+        "get_devices": AsyncMock(return_value=["test-dsn"]),
         "get_properties": AsyncMock(return_value=properties),
     }
     # Null values reach the wrapper once the separate client null fix is applied.

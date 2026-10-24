@@ -12,8 +12,8 @@ from homeassistant.helpers.translation import async_get_translations
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import InvalidCredentialsError
-from custom_components.delonghi_dehumidifier_api.config_flow import InvalidAuth
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN, RUNTIME_REAUTH_ID
+from tests.identity_helpers import bound_entry
 
 CONFIG = {
     CONF_LANGUAGE: "pt",
@@ -34,7 +34,7 @@ def test_runtime_english_matches_source():
 @pytest.mark.parametrize("flow_type", ["config", "options"])
 @pytest.mark.parametrize(
     ("failure", "expected"),
-    [(InvalidAuth(), "invalid_auth"), (RuntimeError("failure"), "unknown")],
+    [(InvalidCredentialsError(), "invalid_auth"), (RuntimeError("failure"), "unknown")],
 )
 async def test_setup_and_options_labels_and_errors(hass, flow_type, failure, expected):
     """Each form field and returned error has a usable runtime translation."""
@@ -44,7 +44,7 @@ async def test_setup_and_options_labels_and_errors(hass, flow_type, failure, exp
         )
         manager = hass.config_entries.flow
     else:
-        entry = MockConfigEntry(domain=DOMAIN, data=CONFIG)
+        entry = bound_entry(domain=DOMAIN, data=CONFIG)
         entry.add_to_hass(hass)
         result = await hass.config_entries.options.async_init(entry.entry_id)
         manager = hass.config_entries.options
@@ -61,7 +61,7 @@ async def test_setup_and_options_labels_and_errors(hass, flow_type, failure, exp
         assert text and "[%key:" not in text
 
     with patch(
-        "custom_components.delonghi_dehumidifier_api.config_flow.validate_input",
+        "custom_components.delonghi_dehumidifier_api.config_flow.APIClient.authenticate",
         AsyncMock(side_effect=failure),
     ):
         result = await manager.async_configure(result["flow_id"], user_input=CONFIG)
@@ -80,7 +80,7 @@ async def test_empty_token_error_does_not_claim_incorrect_credentials(hass, flow
         )
         manager = hass.config_entries.flow
     else:
-        entry = MockConfigEntry(domain=DOMAIN, data=CONFIG)
+        entry = bound_entry(domain=DOMAIN, data=CONFIG)
         entry.add_to_hass(hass)
         result = await hass.config_entries.options.async_init(entry.entry_id)
         manager = hass.config_entries.options

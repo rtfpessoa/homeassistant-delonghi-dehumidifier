@@ -48,6 +48,10 @@ async def test_successful_config_flow(hass: HomeAssistant, single_appliance):
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], user_input=MOCK_BASIC_CONFIG_PAGE
     )
+    assert result["step_id"] == "select_device"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input={"device_dsn": "test-dsn"}
+    )
 
     # Check that the config flow is complete and a new entry is created with
     # the input data

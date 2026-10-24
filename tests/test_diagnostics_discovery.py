@@ -6,10 +6,10 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from tests.identity_helpers import bound_entry as MockConfigEntry
 
 
 @pytest.mark.parametrize("frontend_first", [True, False])
@@ -37,6 +37,7 @@ async def test_frontend_discovers_diagnostics(hass, hass_ws_client, frontend_fir
         for name, value in properties.items()
     ]
     entry = MockConfigEntry(
+        dsn="TEST-DSN",
         domain=DOMAIN,
         data={
             CONF_EMAIL: "test@example.com",
@@ -49,6 +50,7 @@ async def test_frontend_discovers_diagnostics(hass, hass_ws_client, frontend_fir
     with (
         patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
         patch.object(APIClient, "get_first_device", AsyncMock(return_value="TEST-DSN")),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["TEST-DSN"])),
         patch.object(APIClient, "get_request", AsyncMock(return_value=records)),
     ):
         if frontend_first:

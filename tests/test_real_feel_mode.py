@@ -1012,7 +1012,7 @@ async def test_preflight_spanning_pending_expiry_cannot_route_stale_read(hass, c
     await set_mode(hass, "REAL_FEEL")
     await hass.async_block_till_done(wait_background_tasks=True)
     entity = hass.data["humidifier"].get_entity(humidifier_id(hass))
-    entity._pending_deadline = hass.loop.time() + 0.05
+    entity._pending_deadline = hass.loop.time() + 60
     old = cloud[2]()
     started, release = asyncio.Event(), asyncio.Event()
     calls = 0
@@ -1030,13 +1030,13 @@ async def test_preflight_spanning_pending_expiry_cannot_route_stale_read(hass, c
     task = asyncio.create_task(set_mode(hass, "DEHUMIDIFY"))
     try:
         await asyncio.wait_for(started.wait(), 3)
-        await asyncio.sleep(0.06)
         cloud[1]["activate_realfeel"] = REAL_FEEL_ACTIVATION_PAYLOAD
         entity._pending_timer.cancel()
         entity._pending_expired(entity._pending_generation)
-        release.set()
-        with pytest.raises(ServiceValidationError, match="Wait"):
-            await task
+        with patch.object(hass.loop, "time", return_value=entity._pending_deadline + 1):
+            release.set()
+            with pytest.raises(ServiceValidationError, match="Wait"):
+                await task
         await hass.async_block_till_done(wait_background_tasks=True)
         cloud[4].assert_awaited_once()
         assert hass.states.get(humidifier_id(hass)).attributes["mode"] == "REAL_FEEL"

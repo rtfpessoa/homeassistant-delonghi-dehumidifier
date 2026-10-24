@@ -7,8 +7,27 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
+from custom_components.delonghi_dehumidifier_api.const import DOMAIN
 
 pytest_plugins = "pytest_homeassistant_custom_component"  # pylint: disable=invalid-name
+
+
+@pytest.fixture(autouse=True)
+def isolate_ownership_storage(request, tmp_path):
+    """Keep durable elections separate from HA's shared test config directory."""
+    if "hass" not in request.fixturenames:
+        yield
+        return
+    hass = request.getfixturevalue("hass")
+    original_path = hass.config.path
+
+    def path(*parts):
+        if parts == (".storage", f"{DOMAIN}.claims"):
+            return str(tmp_path / ".storage" / f"{DOMAIN}.claims")
+        return original_path(*parts)
+
+    with patch.object(hass.config, "path", side_effect=path):
+        yield
 
 
 # This fixture enables loading custom integrations in all tests.
@@ -38,6 +57,7 @@ def single_appliance():
         APIClient,
         get_access_token=AsyncMock(return_value="TEST-TOKEN"),
         get_product_name=AsyncMock(return_value="TEST-PRODUCT-NAME"),
+        get_devices=AsyncMock(return_value=["test-dsn"]),
     ):
         yield
 

@@ -92,7 +92,11 @@ class AuthAvailabilityEntity(Entity):
     @property
     def available(self) -> bool:
         """Keep other platform-specific availability checks."""
-        return not self.client.invalid_credentials and super().available
+        return (
+            not self.client.closed
+            and not self.client.invalid_credentials
+            and super().available
+        )
 
     async def async_added_to_hass(self) -> None:
         """Update the entity state when the shared client rejects credentials."""

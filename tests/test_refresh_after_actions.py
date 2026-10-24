@@ -1,7 +1,7 @@
 """Test post-action observations through Home Assistant services and states."""
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.components.humidifier import DATA_COMPONENT as HUMIDIFIER_COMPONENT
@@ -17,7 +17,6 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_component import async_update_entity
 from homeassistant.helpers.event import async_track_state_change_event
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api import action_refresh, humidifier
 from custom_components.delonghi_dehumidifier_api.client import APIClient
@@ -33,6 +32,7 @@ from tests import (
     test_runtime_reauth,
     test_switch_refresh,
 )
+from tests.identity_helpers import bound_entry as MockConfigEntry
 
 device = test_switch_refresh.device
 cloud = real_feel_helpers.cloud
@@ -335,6 +335,7 @@ async def test_followup_is_scoped_to_its_config_entry(hass, device):
     """A command does not force updates in another integration entry."""
     _, properties, _, _, _, eco, _, _ = device
     other = MockConfigEntry(
+        dsn="OTHER-DSN",
         domain=DOMAIN,
         data={
             CONF_EMAIL: "other@example.invalid",
@@ -343,7 +344,10 @@ async def test_followup_is_scoped_to_its_config_entry(hass, device):
         },
     )
     other.add_to_hass(hass)
-    with patch.object(APIClient, "get_first_device", return_value="OTHER-DSN"):
+    with (
+        patch.object(APIClient, "get_first_device", return_value="OTHER-DSN"),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["OTHER-DSN"])),
+    ):
         assert await hass.config_entries.async_setup(other.entry_id)
         await hass.async_block_till_done()
     registry = er.async_get(hass)

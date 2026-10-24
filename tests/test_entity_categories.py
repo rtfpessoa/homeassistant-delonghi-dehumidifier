@@ -14,10 +14,10 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import category_registry as cr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import label_registry as lr
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from tests.identity_helpers import bound_entry as MockConfigEntry
 
 PRIMARY_ENTITIES = (
     ("humidifier", "dehumidifier", EntityCategory.CONFIG),
@@ -103,6 +103,7 @@ async def setup_entities(hass, request):
         APIClient,
         authenticate=AsyncMock(return_value=True),
         get_first_device=AsyncMock(return_value="test-dsn"),
+        get_devices=AsyncMock(return_value=["test-dsn"]),
         get_properties=AsyncMock(return_value=properties),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)

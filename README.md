@@ -45,7 +45,60 @@ a GitHub release is a separate step from changing the manifest version.
 
 1. Add `DeLonghi Dehumidifier (API)` integration via UI.
 2. Enter DeLonghi language, cloud email and password.
-3. The integration uses the first device returned by the cloud API.
+3. Select the intended device from the discovered IDs. Any matching Home
+   Assistant device names are also shown. If there are several devices,
+   privately verify which ID belongs to the intended appliance; cloud list
+   order alone does not identify it. Do not continue if you cannot verify it.
+4. Add another integration entry to use another device with the same account.
+
+Each entry remains bound to its selected device. Changing credentials or the
+account language requires that the same device is accessible to the new account.
+Devices shared with an account may be read-only; a denied command is reported
+without retrying it or switching devices. Discovery does not establish device
+type or supported capabilities.
+
+On upgrade, use each entry's Repairs issue to confirm its device, even if the
+registry identifies only one. The selector shows known Home Assistant device
+names and IDs, or discovers IDs from the account if no association is known.
+Existing entries retain their registry device and entity identities when the
+account still has access. Privately verify the ID and explicitly choose an
+owner. Review the confirmation carefully:
+Home Assistant may reassociate existing entities with that owner. Historical
+associations are retained, and deleting an entry can trigger Home Assistant's
+own cleanup of its entities. A device already bound to an entry cannot be
+silently replaced; restore access or add a separate entry for another device.
+
+Before upgrading, persistently disable every entry of this integration, restart
+Home Assistant, and verify that the entries remain disabled. Then retain a full
+Home Assistant backup including the matching integration,
+configuration, registries and ownership journal
+(`.storage/delonghi_dehumidifier_api.claims`, if present). You can re-enable
+the entries after taking this backup. Restore these components together.
+An absent journal may mean a first upgrade, deletion, or an incomplete restore;
+each device without its own matching claim requires confirmation, even when
+another device has a claim. Missing, mismatched or corrupt claims block control
+until recovery or restoration of a matching backup. A complete but stale backup
+cannot be distinguished from current data: restoring it intentionally rolls
+back the configuration.
+
+Before downgrading, disable or unload all entries of this integration and stop
+Home Assistant. While it is stopped, restore the matching pre-upgrade integration
+and backup with its entries persistently disabled, including its journal if
+present. Verify the entries remain disabled on the first startup after restoring,
+then restart Home Assistant again and verify they are still disabled. Restoring
+a backup can restore enabled entries, so disabling them before restoration is
+not enough.
+If the only backup has enabled entries, block De'Longhi/Ayla cloud access at the
+network boundary throughout restoration and startup until the entries are
+persistently disabled and verified after restart; otherwise, do not restore it.
+Never run old integration code with the new multi-entry configuration:
+older code ignores the binding and can command a different device if cloud
+order changes. Even with a matching pre-upgrade backup, keep old entries
+disabled or unloaded while the account has multiple devices. Run old code only
+if the account is reliably restricted to the intended single device, or the old
+code has been fixed and tested to pin that device. Checking the list order once
+does not make subsequent commands safe. Changes made after the backup may need
+separate recovery; do not silently overwrite history.
 
 If you also have the `delonghi_dehumidifier_wifi` integration, it has a separate
 Home Assistant entry. Adding this API integration does not automatically migrate
@@ -59,8 +112,9 @@ Requires account created in DeLonghi cloud.
 
 ## Limitations
 
-- Only the first device returned by the cloud API is used. If your account has
-  multiple devices, the integration does not provide a way to choose one.
+- Capabilities are established only for the tested appliance, not every device
+  the cloud account returns. Vendor behavior has not been verified for all
+  shared devices or account combinations.
 
 ## Supported entities
 

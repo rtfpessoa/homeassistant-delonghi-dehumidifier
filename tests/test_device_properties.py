@@ -8,13 +8,11 @@ from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD, STATE_
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry,
-    async_fire_time_changed,
-)
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient, OffOnStatus
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from tests.identity_helpers import bound_entry as MockConfigEntry
 
 
 @pytest.fixture
@@ -46,6 +44,7 @@ async def device_with_missing_properties(hass):
         ]
 
     entry = MockConfigEntry(
+        dsn="TEST-DSN",
         domain=DOMAIN,
         data={
             CONF_EMAIL: "test@example.com",
@@ -61,6 +60,7 @@ async def device_with_missing_properties(hass):
             APIClient, "get_request", AsyncMock(side_effect=get_properties_request)
         ) as get_request,
         patch.object(APIClient, "get_first_device", AsyncMock(return_value="TEST-DSN")),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["TEST-DSN"])),
         patch.object(APIClient, "set_eco", new_callable=AsyncMock) as set_eco,
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
