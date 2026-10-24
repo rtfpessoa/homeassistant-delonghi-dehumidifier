@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import aiohttp
@@ -228,7 +229,10 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def _selection_schema(self):
         registry = dr.async_get(self.hass)
         labels = {dsn: dsn for dsn in self._devices}
-        for device in registry.devices.values():
+        devices = registry.devices
+        if isinstance(devices, Mapping):
+            devices = devices.values()
+        for device in devices:
             name = device.name_by_user or device.name
             if name:
                 for domain, dsn in device.identifiers:
