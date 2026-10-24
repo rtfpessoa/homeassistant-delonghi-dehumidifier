@@ -44,9 +44,9 @@ jobs:
             frontend: "20250214.0"
             test_plugin: "0.13.214"
           - python: "3.14.8"
-            homeassistant: "2026.10.2"
-            frontend: "20260930.4"
-            test_plugin: "0.13.373"
+            homeassistant: "2026.10.3"
+            frontend: "20260930.5"
+            test_plugin: "0.13.374"
     steps:
       - uses: "actions/checkout@v4"
       - uses: "actions/setup-python@v5"
