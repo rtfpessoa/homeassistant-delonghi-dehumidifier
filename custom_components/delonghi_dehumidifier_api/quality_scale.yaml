@@ -12,8 +12,8 @@ rules:
   config-flow-test-coverage: done  # Coverage CI and the config flow recovery tests.
   config-flow: done  # Setup and reconfiguration validate the account and selected device.
   dependency-transparency:
-    status: todo
-    comment: The manifest has no standalone protocol dependency. For Core, publish the client as a licensed, tagged PyPI source distribution through public CI.
+    status: exempt
+    comment: This component declares no external requirements. Reassess this rule when the protocol client becomes a separate package.
   docs-actions:
     status: exempt
     comment: There are no integration-specific actions. The README demonstrates standard humidifier actions.
