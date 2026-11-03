@@ -715,3 +715,18 @@ async def test_delayed_stale_mode_echo_does_not_create_activity(
     assert hass.states.get(entity_id).attributes["mode"] == requested
     assert [event["message"] for event in events] == [message]
     post.assert_awaited_once()
+
+
+async def test_removing_entity_cancels_already_queued_refresh(hass, device):
+    """A notification queued just before removal must never schedule an update."""
+    entry, _, _, _, _, eco, *_ = device
+    switch = hass.data[SWITCH_COMPONENT].get_entity(eco)
+    generation = entry.runtime_data.action_refresh.generation
+    with patch.object(switch, "async_schedule_update_ha_state") as schedule:
+        switch._request_action_refresh(generation)
+        switch._request_action_refresh(generation)
+        await switch.async_remove()
+        await asyncio.sleep(0)
+    schedule.assert_not_called()
+    state = hass.states.get(eco)
+    assert state is None or state.state == "unavailable"
