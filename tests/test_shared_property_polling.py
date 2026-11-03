@@ -1,16 +1,23 @@
 """Exercise shared property reads and command safety through Home Assistant."""
 
 import asyncio
+import logging
+import traceback
 from unittest.mock import AsyncMock
 
 import aiohttp
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_component import async_update_entity
 
-from custom_components.delonghi_dehumidifier_api.client import APIClient
+from custom_components.delonghi_dehumidifier_api.client import (
+    APIClient,
+    TransientCloudError,
+)
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
 from tests import test_switch_refresh
+from tests.test_client_http import make_client
 
 device = test_switch_refresh.device
 
@@ -179,11 +186,111 @@ async def test_abandoned_old_request_cannot_replace_new_snapshot():
     assert client.device_properties == [{"name": "swing", "value": 1}]
 
 
-async def test_abandoned_request_exception_is_consumed():
+@pytest.mark.parametrize(
+    "failure", [aiohttp.ClientConnectionError, TimeoutError, HomeAssistantError]
+)
+async def test_shared_failure_is_safe_even_when_the_runtime_formats_the_task(failure):
+    client = APIClient(None, "en", "test@example.com", "password")
+    client.device_dsn = "test-dsn"
+    client.get_request = AsyncMock(side_effect=failure("secret-cloud-detail"))
+    with pytest.raises(failure) as error:
+        await client.get_properties()
+    assert "secret-cloud-detail" not in repr(error.value)
+    assert "secret-cloud-detail" not in "".join(traceback.format_exception(error.value))
+
+
+@pytest.mark.parametrize(
+    ("status", "kind"), [(307, HomeAssistantError), (429, TransientCloudError)]
+)
+async def test_shared_failure_keeps_the_numeric_http_status(status, kind):
+    client, session, _ = make_client(status, {"detail": "private-cloud-payload"})
+    with pytest.raises(kind, match=f"HTTP {status}") as error:
+        await client.get_properties()
+    assert "private-cloud-payload" not in "".join(
+        traceback.format_exception(error.value)
+    )
+    assert len(session.calls) == 1
+
+
+@pytest.mark.parametrize("malformed", [{}, "", None])
+async def test_outage_only_recovers_on_a_valid_property_list(malformed, caplog):
+    client = APIClient(None, "en", "test@example.com", "password")
+    client.device_dsn = "test-dsn"
+    snapshot = [{"property": {"name": "swing", "value": 1}}]
+    client.get_request = AsyncMock(
+        side_effect=[snapshot, TimeoutError(), malformed, []]
+    )
+    assert await client.get_properties() == [{"name": "swing", "value": 1}]
+    client.invalidate_properties()
+    caplog.set_level(logging.INFO, logger=client.__module__)
+    with pytest.raises(TimeoutError):
+        await client.get_properties()
+    with pytest.raises(HomeAssistantError):
+        await client.get_properties()
+    assert client.device_properties == [{"name": "swing", "value": 1}]
+    assert caplog.messages == ["DeLonghi cloud device data is unavailable"]
+    assert await client.get_properties() == []
+    assert caplog.messages == [
+        "DeLonghi cloud device data is unavailable",
+        "DeLonghi cloud device data is available again",
+    ]
+
+
+@pytest.mark.parametrize("initial_outage", [False, True])
+async def test_obsolete_result_cannot_announce_a_connectivity_transition(
+    initial_outage, caplog
+):
+    client = APIClient(None, "en", "test@example.com", "password")
+    client.device_dsn = "test-dsn"
+    client.get_request = AsyncMock(return_value=[])
+    await client.get_properties()
+    client.invalidate_properties()
+    caplog.set_level(logging.INFO, logger=client.__module__)
+    if initial_outage:
+        client.get_request.side_effect = TimeoutError()
+        with pytest.raises(TimeoutError):
+            await client.get_properties()
+        caplog.clear()
+
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def stale_read(_path):
+        started.set()
+        await release.wait()
+        if not initial_outage:
+            raise TimeoutError()
+        return []
+
+    client.get_request.side_effect = stale_read
+    task = asyncio.create_task(client.get_properties())
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        client.invalidate_properties()
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+    assert not caplog.records
+
+    client.get_request.side_effect = None if initial_outage else TimeoutError()
+    if initial_outage:
+        await client.get_properties()
+        expected = "DeLonghi cloud device data is available again"
+    else:
+        with pytest.raises(TimeoutError):
+            await client.get_properties()
+        expected = "DeLonghi cloud device data is unavailable"
+    assert caplog.messages == [expected]
+
+
+async def test_abandoned_request_exception_is_consumed(caplog):
     client = APIClient(None, "en", "test@example.com", "password")
     client.device_dsn = "test-dsn"
     started = asyncio.Event()
     finished = asyncio.Event()
+    client.get_request = AsyncMock(return_value=[])
+    await client.get_properties()
+    client.invalidate_properties()
+    caplog.set_level(logging.INFO, logger=client.__module__)
 
     async def read(_path):
         started.set()
@@ -207,3 +314,4 @@ async def test_abandoned_request_exception_is_consumed():
         await asyncio.sleep(0)
         await asyncio.sleep(0)
         assert not errors
+        assert not caplog.records

@@ -25,6 +25,8 @@ from .utils import fetch_device_info
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=1)
+# The client coalesces reads; each switch serializes writes to its property.
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
@@ -161,9 +163,7 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
                     self._skip_next_poll = False
                 return
             # A failed poll must not leave an old state displayed.
-            if self.available:
-                _LOGGER.warning("Unable to update switch (%s)", type(err).__name__)
-            self._attr_available = False
+            self._mark_poll_unavailable(err, _LOGGER)
             return
 
         if generation != self._command_generation:

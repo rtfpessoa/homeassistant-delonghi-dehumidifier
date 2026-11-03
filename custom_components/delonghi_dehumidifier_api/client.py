@@ -343,6 +343,18 @@ class TransientCloudError(HomeAssistantError):
     """The cloud service is temporarily unavailable or rate limiting requests."""
 
 
+class CloudHTTPError(HomeAssistantError):
+    """A rejected cloud request whose numeric HTTP status is safe to report."""
+
+    def __init__(self, status: int) -> None:
+        self.status = status
+        super().__init__(f"DeLonghi API request failed (HTTP {status})")
+
+
+class TransientHTTPError(CloudHTTPError, TransientCloudError):
+    """A retryable HTTP status from the cloud."""
+
+
 def _raise_for_transient_response(response: aiohttp.ClientResponse) -> None:
     """Release and classify a temporary response without exposing its contents."""
     if (
@@ -352,9 +364,7 @@ def _raise_for_transient_response(response: aiohttp.ClientResponse) -> None:
         < _HTTP_SERVER_ERROR_LIMIT
     ):
         response.release()
-        raise TransientCloudError(
-            f"DeLonghi API request failed (HTTP {response.status})"
-        )
+        raise TransientHTTPError(response.status)
 
 
 class InvalidDeviceListError(HomeAssistantError):
@@ -367,6 +377,36 @@ class NoDevicesError(HomeAssistantError):
 
 class InvalidNumericStateError(HomeAssistantError):
     """A cloud property cannot be interpreted as an integer state."""
+
+
+def is_poll_connection_error(error: Exception) -> bool:
+    """Identify shared cloud failures independently of individual property values."""
+    return isinstance(
+        error, (aiohttp.ClientError, TimeoutError, HomeAssistantError)
+    ) and not isinstance(error, (InvalidCredentialsError, InvalidNumericStateError))
+
+
+def _safe_property_error(error: Exception) -> Exception:
+    """Keep retry semantics without retaining private details in a shared task's result."""
+    message = "Unable to read DeLonghi cloud device data"
+    if (
+        isinstance(error, CloudHTTPError)
+        and type(error.status) is int
+        and 100 <= error.status < _HTTP_SERVER_ERROR_LIMIT
+    ):
+        kind = (
+            TransientHTTPError
+            if isinstance(error, TransientCloudError)
+            else CloudHTTPError
+        )
+        return kind(error.status)
+    if isinstance(error, TimeoutError):
+        return TimeoutError(message)
+    if isinstance(error, aiohttp.ClientError):
+        return aiohttp.ClientConnectionError(message)
+    if isinstance(error, TransientCloudError):
+        return TransientCloudError(message)
+    return HomeAssistantError(message)
 
 
 def parse_integer_state(value: object) -> int | None:
@@ -490,6 +530,7 @@ class APIClient:
         """Set up the shared property request and its waiter coordination."""
         self._properties_request: asyncio.Task[list[dict]] | None = None
         self._properties_waiters = 0
+        self._properties_available = True
         self._properties_generation = 0
         self._properties_request_generation = 0
         self._properties_idle = asyncio.Event()
@@ -1207,9 +1248,7 @@ class APIClient:
         """Decode a successful response or report its HTTP status."""
         _raise_for_transient_response(response)
         if not 200 <= response.status < 300:
-            raise HomeAssistantError(
-                f"DeLonghi API request failed (HTTP {response.status})"
-            )
+            raise CloudHTTPError(response.status)
         return await response.json()
 
     async def get_request(self, path: str) -> dict:
@@ -1398,22 +1437,50 @@ class APIClient:
         self._properties_generation += 1
         self.device_properties_timestamp = 0
 
+    def _current_properties_request(self, generation: int) -> bool:
+        """Only a live request for this generation can publish data or availability."""
+        return (
+            self._properties_request is asyncio.current_task()
+            and generation == self._properties_generation
+            and not self.closed
+            and not self.invalid_credentials
+        )
+
+    def _set_properties_available(self, available: bool) -> None:
+        """Announce each connectivity transition once, after successful setup polling."""
+        if self.device_properties is None or self._properties_available == available:
+            return
+        self._properties_available = available
+        if available:
+            _LOGGER.info("DeLonghi cloud device data is available again")
+        else:
+            _LOGGER.info("DeLonghi cloud device data is unavailable")
+
     async def _fetch_properties(self, generation: int) -> list[dict]:
         """Fetch a snapshot once for all current readers."""
         device_dsn = urllib.parse.quote(await self.get_first_device(), safe="")
         request_started = time.monotonic()
-        device_properties = await self.get_request(
-            f"apiv1/dsns/{device_dsn}/properties.json"
-        )
-        self._ensure_valid_credentials()
-        properties = [
-            device_property.get("property") for device_property in device_properties
-        ]
+        try:
+            device_properties = await self.get_request(
+                f"apiv1/dsns/{device_dsn}/properties.json"
+            )
+            self._ensure_valid_credentials()
+            if not isinstance(device_properties, list):
+                raise HomeAssistantError("Invalid DeLonghi property list")
+            properties = [
+                device_property.get("property") for device_property in device_properties
+            ]
+        except InvalidCredentialsError:
+            raise InvalidCredentialsError(
+                "DeLonghi credentials were rejected"
+            ) from None
+        except Exception as err:  # noqa: BLE001 - sanitize shared task errors
+            if self._current_properties_request(generation):
+                self._set_properties_available(False)
+            raise _safe_property_error(err) from None
         # An abandoned, cancellation-resistant request must not replace newer data.
-        if (
-            self._properties_request is asyncio.current_task()
-            and generation == self._properties_generation
-        ):
+        if self._current_properties_request(generation):
+            self._set_properties_available(True)
             self.device_properties = properties
             self.device_properties_request_started = request_started
             self.device_properties_timestamp = time.time()

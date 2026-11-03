@@ -39,6 +39,8 @@ from .utils import fetch_device_info
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=1)
+# Sensor polls share the same in-flight property request.
+PARALLEL_UPDATES = 0
 
 
 def get_temperature_celsius(
