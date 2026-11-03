@@ -22,6 +22,7 @@ from custom_components.delonghi_dehumidifier_api.const import (
     REAL_FEEL_DEACTIVATION_PAYLOAD,
 )
 from tests import real_feel_helpers, test_real_feel_mode
+from tests.diagnostic_helpers import enable_diagnostics
 
 cloud = real_feel_helpers.cloud
 
@@ -73,6 +74,12 @@ async def test_confirmed_mode_change_appears_in_device_activity(
     assert await async_setup_component(hass, "logbook", {})
     cloud[1].update(device_mode=2, activate_realfeel=REAL_FEEL_DEACTIVATION_PAYLOAD)
     await real_feel_helpers.setup(hass, cloud)
+    sensor_id = er.async_get(hass).async_get_entity_id(
+        "sensor",
+        "delonghi_dehumidifier_api",
+        "delonghi_dehumidifier_api_test-dsn_device_mode_sensor",
+    )
+    await enable_diagnostics(hass, cloud[0], sensor_id)
     entity_id = test_real_feel_mode.humidifier_id(hass)
     assert hass.states.get(entity_id).attributes["mode"] == "DRY_CLOTHES"
 
@@ -83,11 +90,6 @@ async def test_confirmed_mode_change_appears_in_device_activity(
     cloud[4].side_effect = write
     await test_real_feel_mode.set_mode(hass, "REAL_FEEL")
     assert hass.states.get(entity_id).attributes["mode"] == "REAL_FEEL"
-    sensor_id = er.async_get(hass).async_get_entity_id(
-        "sensor",
-        "delonghi_dehumidifier_api",
-        "delonghi_dehumidifier_api_test-dsn_device_mode_sensor",
-    )
     await async_update_entity(hass, sensor_id)
     entries = await activity_entries(hass, recorder_mock, entity_id)
     assert any(event.get("message") == "Reported mode: Real Feel" for event in entries)

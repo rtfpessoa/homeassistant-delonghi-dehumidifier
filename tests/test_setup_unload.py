@@ -14,6 +14,7 @@ from homeassistant.helpers import entity_registry as er
 
 from custom_components.delonghi_dehumidifier_api.client import APIClient
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
+from tests.diagnostic_helpers import enable_diagnostics
 from tests.identity_helpers import bound_entry as MockConfigEntry
 
 
@@ -67,6 +68,9 @@ async def test_setup_and_unload_device(hass):
             "sensor", DOMAIN, f"{DOMAIN}_TEST-DSN_device_mode_sensor"
         )
         assert mode_entity_id == "sensor.test_dehumidifier_cloud_mode_raw"
+        await enable_diagnostics(
+            hass, entry, mode_entity_id, "sensor.test_dehumidifier_current_speed_raw"
+        )
         expected_states = {
             "humidifier.test_dehumidifier_unit": "on",
             "sensor.test_dehumidifier_current_humidity": "54",

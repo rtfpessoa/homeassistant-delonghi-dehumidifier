@@ -162,6 +162,12 @@ This custom component creates following entities for the dehumidifier:
 | `switch`     | Switch to enable eco mode.                                                                                                       |
 | `switch`     | Switch to enable fan swing.                                                                                                      |
 
+New registry entries for **Current speed (raw)** and **Cloud mode (raw)** are
+initially disabled. To collect their values and history, open the dehumidifier
+under **Settings > Devices & services > Devices**, show its disabled entities,
+and enable the sensors you want in their entity settings. An upgrade preserves
+the enabled or disabled setting of each existing sensor.
+
 The **Current speed (raw)** diagnostic sensor reports the cloud's
 `current_speed` number without a unit; its meaning and scale are not established.
 It replaces the former **Current Speed** sensor, which labeled the number as m/s

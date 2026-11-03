@@ -94,6 +94,7 @@ async def async_setup_entry(
                 client.get_current_speed,
                 None,
                 state_class=SensorStateClass.MEASUREMENT,
+                enabled_default=False,
             ),
             GenericSensor(
                 device_dsn,
@@ -133,6 +134,7 @@ async def async_setup_entry(
                 get_and_extract_enum_name(client.get_device_mode),
                 SensorDeviceClass.ENUM,
                 options=[mode.name for mode in Mode],
+                enabled_default=False,
             ),
             GenericSensor(
                 device_dsn,
@@ -214,6 +216,8 @@ class GenericSensor(AuthAvailabilityEntity, SensorEntity):
         unit_of_measurement: str | None = None,
         options: list[str] | None = None,
         entity_category: EntityCategory | None = EntityCategory.DIAGNOSTIC,
+        *,
+        enabled_default: bool = True,
     ) -> None:
         """Initialize."""
         self.client = client
@@ -225,6 +229,7 @@ class GenericSensor(AuthAvailabilityEntity, SensorEntity):
         self._get_value = get_value
         self._attr_device_class = device_class
         self._attr_entity_category = entity_category
+        self._attr_entity_registry_enabled_default = enabled_default
         self._attr_state_class = state_class
         self._attr_native_unit_of_measurement = unit_of_measurement
         self._attr_options = options

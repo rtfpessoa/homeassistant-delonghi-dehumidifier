@@ -36,6 +36,7 @@ from custom_components.delonghi_dehumidifier_api.identity import (
     CONF_DSN,
     device_unique_id,
 )
+from tests.diagnostic_helpers import enable_diagnostics
 from tests.identity_helpers import bound_entry
 
 
@@ -156,6 +157,7 @@ async def test_upgrade_preserves_old_statistics_and_settings(
         if args[3] == "Current Speed Raw":
             args = (*args[:3], "Current Speed", args[4], SensorDeviceClass.SPEED)
             kwargs["unit_of_measurement"] = UnitOfSpeed.METERS_PER_SECOND
+            kwargs["enabled_default"] = True
         return cls(*args, **kwargs)
 
     with (
@@ -219,6 +221,7 @@ async def test_upgrade_preserves_old_statistics_and_settings(
             "sensor", DOMAIN, f"{DOMAIN}_test-dsn_current_speed_raw_sensor"
         )
         assert raw_id and raw_id != old_id
+        await enable_diagnostics(hass, entry, raw_id)
         assert_raw_speed_measurement(hass, registry, raw_id)
         await sync_recorder(recorder_mock)
         now = dt_util.utcnow()
@@ -356,6 +359,7 @@ async def test_restart_retains_registry_and_statistics(
                     "sensor", DOMAIN, f"{DOMAIN}_test-dsn_current_speed_raw_sensor"
                 )
                 assert raw_id
+                await enable_diagnostics(first, entry, raw_id)
                 assert_raw_speed_measurement(first, registry, raw_id)
                 assert_legacy_speed_preserved(first, registry, legacy)
                 assert await first.config_entries.async_unload(entry.entry_id)
