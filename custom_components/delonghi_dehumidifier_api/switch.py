@@ -11,12 +11,12 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import DeLonghiDehumidifierConfigEntry
 from .client import APIClient, OffOnStatus
 from .const import DOMAIN
 from .entity import AuthAvailabilityEntity, translate_command_errors
@@ -31,7 +31,7 @@ PARALLEL_UPDATES = 0
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry[APIClient],
+    config_entry: DeLonghiDehumidifierConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up current environment dehumidifier entity."""
@@ -78,7 +78,7 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
         client: APIClient,
         type_name: str,
         status: OffOnStatus | None,
-        set_status: Callable[[OffOnStatus], Coroutine[Any, Any, dict[Any, Any]]],
+        set_status: Callable[[OffOnStatus], Coroutine[Any, Any, object]],
         get_status: Callable[[], Coroutine[Any, Any, OffOnStatus | None]] | None = None,
     ) -> None:
         """Initialize."""
@@ -94,17 +94,17 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
         self._command_lock = asyncio.Lock()
         self._command_generation = 0
         self._last_successful_command_generation = 0
-        self._last_command_completed = None
+        self._last_command_completed: float | None = None
         self._skip_next_poll = False
         _LOGGER.debug("Initialized switch")
 
     @property
-    def is_on(self):
+    def is_on(self) -> bool | None:
         """If the switch is currently on or off."""
         return self._is_on
 
     @translate_command_errors
-    async def async_turn_on(self, **kwargs):
+    async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         _LOGGER.debug("Turning on switch")
         async with self._command_lock:
@@ -123,7 +123,7 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
             self._skip_next_poll = True
 
     @translate_command_errors
-    async def async_turn_off(self, **kwargs):
+    async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         _LOGGER.debug("Turning off switch")
         async with self._command_lock:

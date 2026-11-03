@@ -31,7 +31,7 @@ class HumidifierCommands:
 
     async def run(
         self,
-        send: Callable[[], Awaitable[dict]],
+        send: Callable[[], Awaitable[object]],
         *,
         guard: Callable[[], Awaitable[None]] | None = None,
         refresh_after_success: bool = False,

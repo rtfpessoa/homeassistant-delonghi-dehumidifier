@@ -6,12 +6,12 @@ import json
 import logging
 import time
 import urllib.parse
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractAsyncContextManager, nullcontext
 from datetime import datetime
 from enum import Enum
 from http import HTTPStatus
-from typing import Final
+from typing import Final, TypeGuard
 from uuid import uuid4
 
 import aiohttp
@@ -278,7 +278,9 @@ class Status(Enum):
     OFF = 2
 
 
-STATUS_BY_VALUE: Final = {status.value: status for status in Status}
+STATUS_BY_VALUE: Final[dict[int | None, Status]] = {
+    status.value: status for status in Status
+}
 
 
 class Mode(Enum):
@@ -297,7 +299,7 @@ class Mode(Enum):
 
 
 MODE_BY_NAME: Final = {mode.name: mode for mode in Mode}
-MODE_BY_VALUE: Final = {mode.value: mode for mode in Mode}
+MODE_BY_VALUE: Final[dict[int | None, Mode]] = {mode.value: mode for mode in Mode}
 
 
 class OffOnStatus(Enum):
@@ -313,7 +315,9 @@ class OffOnStatus(Enum):
     ON = 1
 
 
-OFF_ON_STATUS_BY_VALUE: Final = {status.value: status for status in OffOnStatus}
+OFF_ON_STATUS_BY_VALUE: Final[dict[int | None, OffOnStatus]] = {
+    status.value: status for status in OffOnStatus
+}
 
 
 class FilterStatus(Enum):
@@ -329,7 +333,9 @@ class FilterStatus(Enum):
     NEEDS_REPLACEMENT = 2
 
 
-FILTER_STATUS_BY_VALUE: Final = {status.value: status for status in FilterStatus}
+FILTER_STATUS_BY_VALUE: Final[dict[int | None, FilterStatus]] = {
+    status.value: status for status in FilterStatus
+}
 
 _LOGGER = logging.getLogger(__name__)
 _HTTP_SERVER_ERROR_LIMIT = 600
@@ -446,7 +452,7 @@ class DeviceNotSelectedError(HomeAssistantError):
     """No verified device has been selected for this client."""
 
 
-def usable_dsn(dsn: object) -> bool:
+def usable_dsn(dsn: object) -> TypeGuard[str]:
     """Reject identities that cannot be safely used as a single URL path segment."""
     if not isinstance(dsn, str) or not dsn or dsn in {".", ".."} or dsn != dsn.strip():
         return False
@@ -455,6 +461,14 @@ def usable_dsn(dsn: object) -> bool:
     except UnicodeEncodeError:
         return False
     return not any(ord(char) < 32 or ord(char) == 127 for char in dsn)
+
+
+def property_records(items: Iterable[object]) -> Iterator[dict[str, object]]:
+    """Read JSON objects from a provider list that requires records."""
+    for item in items:
+        if not isinstance(item, dict):
+            raise TypeError("Invalid DeLonghi property record")
+        yield item
 
 
 def _auth_status_error(status: int) -> HomeAssistantError:
@@ -487,7 +501,10 @@ async def _login_token(
             raise InvalidCredentialsError("DeLonghi credentials were rejected")
         if response.status != 200:
             raise _auth_status_error(response.status)
-        return data["sessionInfo"]["login_token"]
+        token = data["sessionInfo"]["login_token"]
+        if not isinstance(token, str) or not token:
+            raise HomeAssistantError("Invalid DeLonghi login token")
+        return token
 
 
 async def _oauth_parameter(
@@ -516,10 +533,10 @@ class APIClient:
         self.email = email
         self.password = password
         self.session = session
-        self.refresh_token = None
-        self.access_token = None
+        self.refresh_token: str | None = None
+        self.access_token: str | None = None
         self.token_expiry = time.time()
-        self._token_request: asyncio.Task[str | None] | None = None
+        self._token_request: asyncio.Task[str] | None = None
         self._token_waiters = 0
         self._initialize_property_requests()
         self._closed = False
@@ -527,11 +544,13 @@ class APIClient:
         self.reauth_id = uuid4().hex
         self.on_invalid_credentials: Callable[[], None] | None = None
         self._auth_listeners: set[Callable[[], None]] = set()
-        self.device_properties = None
-        self.device_properties_timestamp = 0.0
-        self.device_properties_request_started = None
-        self.device_dsn = None
-        self.device_write_guard = None
+        self.device_properties: list[object] | None = None
+        self.device_properties_timestamp: float | None = 0.0
+        self.device_properties_request_started: float | None = None
+        self.device_dsn: str | None = None
+        self.device_write_guard: (
+            Callable[[], AbstractAsyncContextManager[None]] | None
+        ) = None
         self.action_refresh = ActionRefresh(
             self.invalidate_properties, self._can_refresh_after_action
         )
@@ -541,7 +560,7 @@ class APIClient:
 
     def _initialize_property_requests(self) -> None:
         """Set up the shared property request and its waiter coordination."""
-        self._properties_request: asyncio.Task[list[dict]] | None = None
+        self._properties_request: asyncio.Task[list[object]] | None = None
         self._properties_waiters = 0
         self._properties_available = True
         self._properties_generation = 0
@@ -736,7 +755,7 @@ class APIClient:
         eco = await self.get_int_property("set_eco")
         return OFF_ON_STATUS_BY_VALUE.get(eco)
 
-    async def set_status(self, status: Status) -> dict:
+    async def set_status(self, status: Status) -> object:
         """Set the operation status.
 
         - 1 On
@@ -748,7 +767,7 @@ class APIClient:
             {"datapoint": {"value": status.value}},
         )
 
-    async def set_humidity(self, value: int) -> dict:
+    async def set_humidity(self, value: int) -> object:
         """Set the target humidity level.
 
         - [0,100] %
@@ -759,7 +778,7 @@ class APIClient:
             {"datapoint": {"value": value}},
         )
 
-    async def set_mode(self, mode: Mode) -> dict:
+    async def set_mode(self, mode: Mode) -> object:
         """Set the operation mode.
 
         - 1   Dehumidifier
@@ -780,7 +799,7 @@ class APIClient:
             {"datapoint": {"value": mode.value}},
         )
 
-    async def request_exit_real_feel(self) -> dict:
+    async def request_exit_real_feel(self) -> object:
         """Send the tested Real Feel exit request without following redirects."""
         device_dsn = urllib.parse.quote(await self.get_first_device(), safe="")
         return await self.post_request(
@@ -789,7 +808,7 @@ class APIClient:
             allow_redirects=False,
         )
 
-    async def request_enter_real_feel(self) -> dict:
+    async def request_enter_real_feel(self) -> object:
         """Send one Real Feel activation request without following redirects."""
         device_dsn = urllib.parse.quote(await self.get_first_device(), safe="")
         return await self.post_request(
@@ -798,7 +817,7 @@ class APIClient:
             allow_redirects=False,
         )
 
-    async def set_swing(self, status: OffOnStatus) -> dict:
+    async def set_swing(self, status: OffOnStatus) -> object:
         """Set the swing operation mode.
 
         - 0 Off
@@ -810,7 +829,7 @@ class APIClient:
             {"datapoint": {"value": status.value}},
         )
 
-    async def set_eco(self, status: OffOnStatus) -> dict:
+    async def set_eco(self, status: OffOnStatus) -> object:
         """Set the eco operation mode.
 
         - 0 Off
@@ -822,7 +841,7 @@ class APIClient:
             {"datapoint": {"value": status.value}},
         )
 
-    async def get_access_token(self):
+    async def get_access_token(self) -> str:
         """Retrieve the access token.
 
         If the access token is already available as an attribute, it returns the existing token.
@@ -844,7 +863,7 @@ class APIClient:
 
         return await self._request_access_token()
 
-    async def _request_access_token(self):
+    async def _request_access_token(self) -> str:
         """Share a token request among concurrent callers."""
         if self._token_request is None:
             request = asyncio.create_task(self._fetch_access_token())
@@ -863,7 +882,7 @@ class APIClient:
                     self._token_request = None
                 request.cancel()
 
-    async def _fetch_access_token(self):
+    async def _fetch_access_token(self) -> str:
         """Fetch a token and notify entities once if credentials are rejected."""
         try:
             return await self.get_new_access_token()
@@ -875,7 +894,7 @@ class APIClient:
             self._report_invalid_credentials()
             raise
 
-    def _token_request_finished(self, request: asyncio.Task) -> None:
+    def _token_request_finished(self, request: asyncio.Task[str]) -> None:
         """Release a completed request and consume an otherwise unobserved error."""
         if self._token_request is request:
             self._token_request = None
@@ -938,7 +957,7 @@ class APIClient:
         if self.on_invalid_credentials is not None:
             self.on_invalid_credentials()
 
-    async def get_new_access_token(self):
+    async def get_new_access_token(self) -> str:
         """Retrieve a new access token using the refresh token if available.
 
         If no refresh token is available or the refresh token fails, it falls back to performing login and token acquisition.
@@ -991,7 +1010,7 @@ class APIClient:
 
         return await self.get_new_refresh_token()
 
-    async def get_new_refresh_token(self):
+    async def get_new_refresh_token(self) -> str:
         """Obtain a new refresh token and access token.
 
         This method follows a multi-step process to authenticate with the Delonghi Dehumidifier API,
@@ -1017,7 +1036,7 @@ class APIClient:
         # Step 1: Start authentication process
         url = f"https://fidm.eu1.gigya.com/oidc/op/v1.0/{API_KEY}/authorize"
         headers = {"User-Agent": BROWSER_USER_AGENT}
-        params = {
+        params: dict[str, str | int] = {
             "client_id": CLIENT_ID,
             "response_type": "code",
             "redirect_uri": "https://google.it",
@@ -1257,7 +1276,7 @@ class APIClient:
         return access_token
 
     @staticmethod
-    async def _read_response(response: aiohttp.ClientResponse) -> dict:
+    async def _read_response(response: aiohttp.ClientResponse) -> object:
         """Decode a successful response or report its HTTP status."""
         _raise_for_transient_response(response)
         if response.status == HTTPStatus.FORBIDDEN:
@@ -1270,7 +1289,7 @@ class APIClient:
             # Successful responses can still contain HTML or undecodable provider data.
             raise HomeAssistantError("Invalid DeLonghi cloud response") from None
 
-    async def get_request(self, path: str) -> dict:
+    async def get_request(self, path: str) -> object:
         """Send a GET request to the specified path.
 
         Args:
@@ -1292,8 +1311,8 @@ class APIClient:
             return await self._read_response(response)
 
     async def post_request(
-        self, path: str, body: dict, *, allow_redirects: bool | None = None
-    ) -> dict:
+        self, path: str, body: dict[str, object], *, allow_redirects: bool | None = None
+    ) -> object:
         """Send a POST request to the specified path with the given body.
 
         Args:
@@ -1351,7 +1370,7 @@ class APIClient:
             raise DeviceNotSelectedError("No device selected")
         return self.device_dsn
 
-    async def get_property(self, name: str):
+    async def get_property(self, name: str) -> object:
         """Retrieve the value of a specific property from the device.
 
         Args:
@@ -1365,7 +1384,7 @@ class APIClient:
         return next(
             (
                 prop.get("value")
-                for prop in device_properties
+                for prop in property_records(device_properties)
                 if prop.get("name") == name
             ),
             None,
@@ -1395,7 +1414,7 @@ class APIClient:
         """
         return parse_integer_state(await self.get_property(name))
 
-    async def get_properties(self) -> dict:
+    async def get_properties(self) -> list[object]:
         """Retrieve the properties of the device.
 
         This method fetches the device properties from the API if they have not been
@@ -1408,8 +1427,10 @@ class APIClient:
         """
         await self._wait_for_current_properties()
         now = time.time()
-        if self.device_properties_timestamp is not None and (
-            now - self.device_properties_timestamp < 10
+        if (
+            self.device_properties is not None
+            and self.device_properties_timestamp is not None
+            and now - self.device_properties_timestamp < 10
         ):
             return self.device_properties
 
@@ -1425,7 +1446,7 @@ class APIClient:
             await self._properties_idle.wait()
             self._ensure_valid_credentials()
 
-    async def _request_properties(self) -> list[dict]:
+    async def _request_properties(self) -> list[object]:
         """Join a shared GET, releasing it after its last reader leaves."""
         if self._properties_request is None:
             self._properties_request_generation = self._properties_generation
@@ -1475,7 +1496,7 @@ class APIClient:
         else:
             _LOGGER.info("DeLonghi cloud device data is unavailable")
 
-    async def _fetch_properties(self, generation: int) -> list[dict]:
+    async def _fetch_properties(self, generation: int) -> list[object]:
         """Fetch a snapshot once for all current readers."""
         device_dsn = urllib.parse.quote(await self.get_first_device(), safe="")
         request_started = time.monotonic()
@@ -1487,7 +1508,7 @@ class APIClient:
             if not isinstance(device_properties, list):
                 raise HomeAssistantError("Invalid DeLonghi property list")
             properties = [
-                device_property.get("property") for device_property in device_properties
+                item.get("property") for item in property_records(device_properties)
             ]
         except InvalidCredentialsError:
             raise InvalidCredentialsError(
@@ -1505,7 +1526,7 @@ class APIClient:
             self.device_properties_timestamp = time.time()
         return properties
 
-    def _properties_request_finished(self, request: asyncio.Task) -> None:
+    def _properties_request_finished(self, request: asyncio.Task[list[object]]) -> None:
         """Release a finished request and consume any unobserved error."""
         if self._properties_request is request and not self._properties_waiters:
             self._properties_request = None

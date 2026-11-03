@@ -3,18 +3,18 @@
 import asyncio
 import logging
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.humidifier import HumidifierDeviceClass, HumidifierEntity
+from homeassistant.components.humidifier import HumidifierEntity
 from homeassistant.components.humidifier.const import HumidifierEntityFeature
 from homeassistant.components.logbook import async_log_entry
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.translation import async_get_translations
 
+from . import DeLonghiDehumidifierConfigEntry
 from .client import (
     MODE_BY_NAME,
     MODE_BY_VALUE,
@@ -24,11 +24,18 @@ from .client import (
     Mode,
     Status,
     parse_integer_state,
+    property_records,
 )
 from .const import DOMAIN, REAL_FEEL_ACTIVATION_PAYLOAD, REAL_FEEL_DEACTIVATION_PAYLOAD
 from .entity import AuthAvailabilityEntity, command_error, translate_command_errors
 from .real_feel import property_value, supports_real_feel
 from .utils import fetch_device_info
+
+# The enum lived in the platform module on the minimum HA release.
+if TYPE_CHECKING:
+    from homeassistant.components.humidifier.const import HumidifierDeviceClass
+else:
+    from homeassistant.components.humidifier import HumidifierDeviceClass
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,7 +48,7 @@ _PENDING_REFRESH_LIMIT = 4
 _ORDINARY_MODES = [Mode.DEHUMIDIFY.name, Mode.DRY_CLOTHES.name, Mode.PURIFIER.name]
 
 
-def _tested_device_mode(properties: list[dict]) -> str | None:
+def _tested_device_mode(properties: list[object]) -> str | None:
     """Estimate the tested device's mode from its cloud command echo."""
     if not supports_real_feel(properties):
         return None
@@ -62,22 +69,27 @@ def _tested_device_mode(properties: list[dict]) -> str | None:
     return None
 
 
-def _int_property(properties: list[dict], name: str) -> int | None:
+def _int_property(properties: list[object], name: str) -> int | None:
     """Read one integer from a single cloud snapshot."""
     value = next(
-        (prop.get("value") for prop in properties if prop.get("name") == name), None
+        (
+            prop.get("value")
+            for prop in property_records(properties)
+            if prop.get("name") == name
+        ),
+        None,
     )
     return parse_integer_state(value)
 
 
 def _snapshot_values(
-    properties: list[dict], *, tested_device: bool = False
+    properties: list[object], *, tested_device: bool = False
 ) -> tuple[str | None, int | None, int | None, bool | None]:
     """Interpret every humidifier attribute from the same complete snapshot."""
     if tested_device:
         # Keep the tested device's stricter mode interpretation, but never let an
         # invalid present value produce an otherwise plausible partial snapshot.
-        for prop in properties:
+        for prop in property_records(properties):
             if prop.get("name") == "device_mode":
                 parse_integer_state(prop.get("value"))
         mode = _tested_device_mode(properties)
@@ -95,7 +107,7 @@ def _snapshot_values(
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry[APIClient],
+    config_entry: DeLonghiDehumidifierConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up current environment dehumidifier entity."""
@@ -297,7 +309,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
             if tested_device and target == Mode.DEHUMIDIFY:
                 source_mode = await self._fresh_dehumidify_source(lifetime)
 
-        async def send() -> dict:
+        async def send() -> object:
             if not tested_device:
                 return await self.client.set_mode(target)
             return await self._send_tested_mode(target, source_mode, lifetime)
@@ -352,7 +364,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
 
     async def _send_tested_mode(
         self, target: Mode, source: str | None, lifetime: int
-    ) -> dict:
+    ) -> object:
         """Attempt one mode command and keep conflicting echoes pending."""
         self._ensure_not_removed(lifetime)
         self._begin_pending(target.name, source or self._last_observed_mode)
@@ -364,7 +376,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
             if self._lifetime_generation == lifetime and not self._removed:
                 self._finish_pending()
 
-    async def _send_real_feel(self, *, exit_mode: bool) -> dict:
+    async def _send_real_feel(self, *, exit_mode: bool) -> object:
         """Send a single non-redirecting request with a safe error on failure."""
         try:
             if exit_mode:

@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
-from homeassistant.components.binary_sensor import (
-    BinarySensorDeviceClass,
-    BinarySensorEntity,
-)
+from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -18,6 +16,12 @@ from .client import APIClient
 from .const import DOMAIN
 from .entity import AuthAvailabilityEntity
 from .utils import fetch_device_info
+
+# Both supported HA versions export this enum from the platform at runtime.
+if TYPE_CHECKING:
+    from homeassistant.components.binary_sensor.const import BinarySensorDeviceClass
+else:
+    from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 
 SCAN_INTERVAL = timedelta(minutes=1)
 # The device alarm reads the same shared snapshot as the sensors.
@@ -46,7 +50,9 @@ class DeviceAlarm(AuthAvailabilityEntity, BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_available = True
 
-    def __init__(self, client: APIClient, device_dsn: str, device_info: DeviceInfo):
+    def __init__(
+        self, client: APIClient, device_dsn: str, device_info: DeviceInfo
+    ) -> None:
         """Initialize the alarm entity."""
         self.client = client
         self._attr_unique_id = f"{DOMAIN}_{device_dsn}_device_alarm_binary_sensor"
@@ -64,9 +70,6 @@ class DeviceAlarm(AuthAvailabilityEntity, BinarySensorEntity):
 
         self._attr_available = True
         self._attr_is_on = None
-        if not isinstance(properties, list):
-            return
-
         model = next(
             (
                 prop.get("value")

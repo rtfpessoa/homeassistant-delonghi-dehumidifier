@@ -47,6 +47,7 @@ jobs:
             homeassistant: "2026.10.3"
             frontend: "20260930.5"
             test_plugin: "0.13.374"
+            typecheck: true
     steps:
       - uses: "actions/checkout@v4"
       - uses: "actions/setup-python@v5"
@@ -58,5 +59,8 @@ jobs:
           "homeassistant==${{ matrix.homeassistant }}"
           "home-assistant-frontend==${{ matrix.frontend }}"
           "pytest-homeassistant-custom-component==${{ matrix.test_plugin }}"
+      - name: Check integration types
+        if: matrix.typecheck
+        run: python -m mypy
       - name: Run tests
         run: python -m pytest -q

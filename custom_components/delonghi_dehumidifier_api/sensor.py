@@ -14,7 +14,6 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     EntityCategory,
@@ -25,6 +24,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import DeLonghiDehumidifierConfigEntry
 from .client import (
     APIClient,
     FilterStatus,
@@ -57,7 +57,7 @@ def get_temperature_celsius(
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    config_entry: ConfigEntry[APIClient],
+    config_entry: DeLonghiDehumidifierConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up current environment dehumidifier entity."""
@@ -212,7 +212,7 @@ class GenericSensor(AuthAvailabilityEntity, SensorEntity):
         device_info: DeviceInfo,
         client: APIClient,
         type_name: str,
-        get_value: Callable[[], Coroutine[Any, Any, Any]],
+        get_value: Callable[[], Coroutine[Any, Any, int | float | str | None]],
         device_class: SensorDeviceClass | None,
         state_class: SensorStateClass | None = None,
         unit_of_measurement: str | None = None,
@@ -244,7 +244,7 @@ class GenericSensor(AuthAvailabilityEntity, SensorEntity):
         await super().async_added_to_hass()
         await self.async_update()
 
-    async def _async_update(self, *, after_action: bool):
+    async def _async_update(self, *, after_action: bool) -> None:
         """Update the sensor's state.
 
         This method fetches the current humidity from the client and updates the

@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
-import voluptuous as vol
-from homeassistant.components.repairs import RepairsFlow, repairs_flow_manager
+from homeassistant.components.repairs import (
+    RepairsFlow,
+    RepairsFlowManager,
+    repairs_flow_manager,
+)
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.selector import TextSelector, TextSelectorType
 
+from . import DeLonghiDehumidifierConfigEntry
 from .client import (
     APIClient,
     CloudPermissionDeniedError,
@@ -27,6 +31,7 @@ from .identity import (
     CONF_DSN,
     CONF_HISTORICAL_CLAIMS,
     ClaimJournalError,
+    ClaimRecord,
     active_commands,
     binding_lock,
     claimants,
@@ -40,12 +45,23 @@ from .identity import (
     save_election,
 )
 
+if TYPE_CHECKING:
+    # On current HA, voluptuous resolves to Probatio at runtime.
+    import probatio as vol
+    from homeassistant.components.repairs import RepairsFlowResult
+else:
+    import voluptuous as vol
+
+
+type EntrySnapshot = tuple[dict[str, Any], dict[str, Any], str | None, set[str]]
+
 
 async def async_create_fix_flow(
-    hass: HomeAssistant, issue_id: str, data: dict | None
+    hass: HomeAssistant, issue_id: str, data: dict[str, str | int | float | None] | None
 ) -> RepairsFlow:
     """Create a flow even when the entry itself is retrying."""
-    return BindingRepair(data["entry_id"] if data else "")
+    entry_id = data.get("entry_id") if data else None
+    return BindingRepair(entry_id if isinstance(entry_id, str) else "")
 
 
 class BindingRepair(RepairsFlow):
@@ -53,9 +69,11 @@ class BindingRepair(RepairsFlow):
 
     def __init__(self, entry_id: str) -> None:
         self._entry_id = entry_id
-        self._discovery_credentials = {}
+        self._discovery_credentials: dict[str, str] = {}
 
-    def _registry_candidates(self, entry):
+    def _registry_candidates(
+        self, entry: DeLonghiDehumidifierConfigEntry
+    ) -> dict[str, str]:
         """Use established registry associations as private selection labels."""
         registry = dr.async_get(self.hass)
         candidates = {}
@@ -68,7 +86,11 @@ class BindingRepair(RepairsFlow):
             candidates.setdefault(pinned, pinned)
         return candidates
 
-    def _show_init(self, entry, errors=None):
+    def _show_init(
+        self,
+        entry: DeLonghiDehumidifierConfigEntry,
+        errors: dict[str, str] | None = None,
+    ) -> RepairsFlowResult:
         registry = dr.async_get(self.hass)
         names = [
             device.name_by_user or device.name or "—"
@@ -86,7 +108,9 @@ class BindingRepair(RepairsFlow):
             errors=errors,
         )
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None):
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> RepairsFlowResult:
         """Select a privately displayed device, discovering when needed."""
         entry = self.hass.config_entries.async_get_entry(self._entry_id)
         if entry is None:
@@ -103,7 +127,9 @@ class BindingRepair(RepairsFlow):
             entry, {"base": "device_not_available"} if user_input is not None else None
         )
 
-    async def _select_device(self, entry, dsn):
+    async def _select_device(
+        self, entry: DeLonghiDehumidifierConfigEntry, dsn: str
+    ) -> RepairsFlowResult:
         """Load ownership before offering a choice of existing entries."""
         self._dsn = dsn
         if not usable_dsn(self._dsn):
@@ -127,7 +153,9 @@ class BindingRepair(RepairsFlow):
         }
         return await self.async_step_owner()
 
-    async def _discover(self, entry):
+    async def _discover(
+        self, entry: DeLonghiDehumidifierConfigEntry
+    ) -> RepairsFlowResult:
         """Find identities without controlling a device when no registry exists."""
         settings = {**entry.data, **entry.options, **self._discovery_credentials}
         client = APIClient(
@@ -157,7 +185,7 @@ class BindingRepair(RepairsFlow):
             await client.async_shutdown()
         return self._show_discover({"base": error})
 
-    def _show_discover(self, errors=None):
+    def _show_discover(self, errors: dict[str, str] | None = None) -> RepairsFlowResult:
         return self.async_show_form(
             step_id="discover",
             data_schema=vol.Schema(
@@ -172,7 +200,9 @@ class BindingRepair(RepairsFlow):
             errors=errors,
         )
 
-    async def async_step_discover(self, user_input: dict[str, Any] | None = None):
+    async def async_step_discover(
+        self, user_input: dict[str, Any] | None = None
+    ) -> RepairsFlowResult:
         """Retry discovery with optional account credentials."""
         entry = self.hass.config_entries.async_get_entry(self._entry_id)
         if entry is None:
@@ -186,7 +216,9 @@ class BindingRepair(RepairsFlow):
         }
         return await self._discover(entry)
 
-    async def async_step_owner(self, user_input: dict[str, Any] | None = None):
+    async def async_step_owner(
+        self, user_input: dict[str, Any] | None = None
+    ) -> RepairsFlowResult:
         """Choose an owner and optional credentials, including discovery reuse."""
         if device_needs_restart(self.hass, self._dsn):
             return self.async_abort(reason="restart_required")
@@ -234,7 +266,7 @@ class BindingRepair(RepairsFlow):
             data_schema=vol.Schema(fields),
         )
 
-    def _current_snapshot(self):
+    def _current_snapshot(self) -> dict[str, EntrySnapshot]:
         return {
             entry.entry_id: (
                 dict(entry.data),
@@ -245,7 +277,9 @@ class BindingRepair(RepairsFlow):
             for entry in self.hass.config_entries.async_entries(DOMAIN)
         }
 
-    async def async_step_confirm(self, user_input: dict[str, Any] | None = None):
+    async def async_step_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> RepairsFlowResult:
         """Verify account access and elect the selected device's owner."""
         if device_needs_restart(self.hass, self._dsn):
             return self.async_abort(reason="restart_required")
@@ -264,7 +298,7 @@ class BindingRepair(RepairsFlow):
             return self._show_confirm(error)
         return await self._elect_owner(entry)
 
-    def _show_confirm(self, error=None):
+    def _show_confirm(self, error: str | None = None) -> RepairsFlowResult:
         """Show the confirmation form, with a retryable error if needed."""
         return self.async_show_form(
             step_id="confirm",
@@ -272,7 +306,7 @@ class BindingRepair(RepairsFlow):
             errors={"base": error} if error else None,
         )
 
-    async def _verify_device(self, settings):
+    async def _verify_device(self, settings: dict[str, Any]) -> str | None:
         """Verify access without holding the binding lock or changing entries."""
         client = APIClient(
             aiohttp_client.async_get_clientsession(self.hass),
@@ -300,7 +334,9 @@ class BindingRepair(RepairsFlow):
             await client.async_shutdown()
         return error
 
-    async def _elect_owner(self, entry):
+    async def _elect_owner(
+        self, entry: DeLonghiDehumidifierConfigEntry
+    ) -> RepairsFlowResult:
         """Recheck and persist the election before updating entries under lock."""
         async with binding_lock(self.hass):
             manager = repairs_flow_manager(self.hass)
@@ -341,23 +377,24 @@ class BindingRepair(RepairsFlow):
             self._apply_election(entry, owners, key)
         return self.async_create_entry(data={})
 
-    def _election_context_is_stale(self, manager, current_election):
+    def _election_context_is_stale(
+        self, manager: RepairsFlowManager | None, current_election: ClaimRecord | None
+    ) -> bool:
         """Check the confirmation against current ownership while locked."""
         return (
-            manager is None
-            or not self._flow_is_active(manager)
+            not self._flow_is_active(manager)
             or self._current_snapshot() != self._snapshot
             or pending_claim(self.hass, self._dsn)
             or current_election != self._election
         )
 
-    def _flow_is_active(self, manager):
-        return any(
+    def _flow_is_active(self, manager: RepairsFlowManager | None) -> bool:
+        return manager is not None and any(
             flow["flow_id"] == self.flow_id
             for flow in manager.async_progress_by_handler(DOMAIN)
         )
 
-    async def _save_election(self, entry):
+    async def _save_election(self, entry: DeLonghiDehumidifierConfigEntry) -> None:
         """Persist the selected owner and other associated entries."""
         await save_election(
             self.hass,
@@ -370,7 +407,11 @@ class BindingRepair(RepairsFlow):
             },
         )
 
-    def _has_conflicting_owner(self, entry, owners):
+    def _has_conflicting_owner(
+        self,
+        entry: DeLonghiDehumidifierConfigEntry,
+        owners: list[DeLonghiDehumidifierConfigEntry],
+    ) -> bool:
         """Reject an active journal owner or a separately pinned claimant."""
         if (
             self._election
@@ -391,7 +432,12 @@ class BindingRepair(RepairsFlow):
             for owner in owners
         )
 
-    def _apply_election(self, entry, owners, key):
+    def _apply_election(
+        self,
+        entry: DeLonghiDehumidifierConfigEntry,
+        owners: list[DeLonghiDehumidifierConfigEntry],
+        key: str,
+    ) -> None:
         """Update entry associations after the durable election is written."""
         for owner in owners:
             if owner is entry:

@@ -79,7 +79,12 @@ class _RestartRequired(ConfigEntryError):
         super().__init__(translation_domain=DOMAIN, translation_key="restart_required")
 
 
-def _check_setup_current(hass, entry, dsn, client):
+def _check_setup_current(
+    hass: HomeAssistant,
+    entry: DeLonghiDehumidifierConfigEntry,
+    dsn: str,
+    client: APIClient,
+) -> None:
     """Reject settings changes separately from actual device binding failures."""
     if device_needs_restart(hass, dsn):
         raise _RestartRequired()
@@ -98,7 +103,9 @@ def _check_setup_current(hass, entry, dsn, client):
         raise _SetupRetry("binding_recovery")
 
 
-async def _cleanup_platforms(hass, entry, dsn):
+async def _cleanup_platforms(
+    hass: HomeAssistant, entry: DeLonghiDehumidifierConfigEntry, dsn: str | None
+) -> None:
     """Avoid reusing an entry if cleanup may have stopped partway through."""
     try:
         result = await hass.config_entries.async_unload_platforms(entry, _PLATFORMS)
@@ -113,7 +120,9 @@ async def _cleanup_platforms(hass, entry, dsn):
         raise _RestartRequired()
 
 
-async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_migrate_entry(
+    hass: HomeAssistant, entry: DeLonghiDehumidifierConfigEntry
+) -> bool:
     """Upgrade the schema offline; device binding happens during setup."""
     if entry.version == 1:
         hass.config_entries.async_update_entry(entry, version=2, minor_version=1)
@@ -311,7 +320,9 @@ async def async_setup_entry(
             await client.async_shutdown()
 
 
-def _remove_retired_buttons(hass: HomeAssistant, entry: ConfigEntry) -> None:
+def _remove_retired_buttons(
+    hass: HomeAssistant, entry: DeLonghiDehumidifierConfigEntry
+) -> None:
     """Remove old Real Feel buttons, including disabled or renamed entries."""
     registry = er.async_get(hass)
     for entity in er.async_entries_for_config_entry(registry, entry.entry_id):

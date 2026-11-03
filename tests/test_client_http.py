@@ -520,6 +520,18 @@ async def test_empty_access_token_does_not_replace_cached_credentials():
     assert client.refresh_token is None
 
 
+@pytest.mark.parametrize("token", [None, 42, ""])
+async def test_malformed_login_token_stops_before_account_lookup(token):
+    session, responses = authentication_session()
+    responses[2].body = json.dumps({"sessionInfo": {"login_token": token}})
+    client = APIClient(session, "en", "test@example.com", "secret")
+    with pytest.raises(HomeAssistantError):
+        await client.authenticate()
+    assert responses[2].released
+    assert session.post.call_count == 1
+    assert not client.invalid_credentials
+
+
 @pytest.mark.parametrize("transport_failure", [False, True])
 async def test_authentication_failure_hides_provider_data(transport_failure):
     session, responses = authentication_session()

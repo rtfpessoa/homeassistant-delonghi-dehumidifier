@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
-import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import (
-    ConfigEntry,
     ConfigEntryState,
     ConfigFlowResult,
     OptionsFlow,
@@ -50,6 +48,12 @@ from .identity import (
     restart_required_entries,
     runtime_is_current,
 )
+
+# Home Assistant 2026.9+ aliases voluptuous to Probatio at runtime.
+if TYPE_CHECKING:
+    import probatio as vol
+else:
+    import voluptuous as vol
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -178,7 +182,7 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def _finish_reauth(
         self,
-        entry: ConfigEntry,
+        entry: DeLonghiDehumidifierConfigEntry,
         original_data: dict[str, Any],
         original_options: dict[str, Any],
         password: str,
@@ -246,7 +250,9 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
         )
 
-    async def async_step_select_device(self, user_input=None) -> ConfigFlowResult:
+    async def async_step_select_device(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Ask the user to select a discovered identity explicitly."""
         if user_input is not None:
             return await self._select_device(user_input[CONF_DSN])
@@ -255,7 +261,7 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=self._selection_schema(),
         )
 
-    def _selection_schema(self):
+    def _selection_schema(self) -> vol.Schema:
         registry = dr.async_get(self.hass)
         labels = {dsn: dsn for dsn in self._devices}
         devices = registry.devices
@@ -332,7 +338,9 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+    def async_get_options_flow(
+        config_entry: DeLonghiDehumidifierConfigEntry,
+    ) -> OptionsFlow:
         """Get the options flow for this handler."""
         return DeLonghiOptionsFlow()
 
@@ -341,6 +349,7 @@ class DeLonghiOptionsFlow(config_entries.OptionsFlow):
     """Retain the Configure entry point for existing installations."""
 
     _account_edit: _AccountEdit | None = None
+    config_entry: DeLonghiDehumidifierConfigEntry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

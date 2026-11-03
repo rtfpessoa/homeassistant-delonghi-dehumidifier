@@ -9,23 +9,42 @@ import os
 import re
 import secrets
 import sys
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, TypedDict, cast
 
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.json import save_json
+from homeassistant.util.hass_dict import HassKey
 
-from .client import usable_dsn
+from .client import APIClient, usable_dsn
 from .const import DOMAIN
+
+if TYPE_CHECKING:
+    from . import DeLonghiDehumidifierConfigEntry
+
+
+class ClaimRecord(TypedDict):
+    """An ownership election from the validated, versioned local journal."""
+
+    owner: str
+    losers: list[str]
+
+
+type ClaimJournal = dict[str, ClaimRecord]
+
 
 CONF_DSN = "device_dsn"
 CONF_HISTORICAL_CLAIMS = "historical_device_claims"
 ISSUE_PREFIX = "device_binding_"
-JOURNAL_KEY = f"{DOMAIN}_claims"
+JOURNAL_KEY = HassKey[ClaimJournal](f"{DOMAIN}_claims")
+_COMMANDS = HassKey[dict[str, int]](f"{DOMAIN}_active_commands")
+_BINDING_LOCK = HassKey[asyncio.Lock](f"{DOMAIN}_binding_lock")
 CONF_TRANSFER = "_confirmed_claim_transfer"
 CONF_ENROLLMENT = "_pending_device_enrollment"
 
@@ -49,7 +68,7 @@ def discard_enrollment(hass: HomeAssistant, token: str | None) -> None:
 
 def active_commands(hass: HomeAssistant, entry_id: str) -> int:
     """Count in-flight guarded commands for the entry."""
-    return hass.data.get(f"{DOMAIN}_active_commands", {}).get(entry_id, 0)
+    return hass.data.get(_COMMANDS, {}).get(entry_id, 0)
 
 
 class ClaimJournalError(Exception):
@@ -71,8 +90,8 @@ def _valid_claim_record(key: object, record: object) -> bool:
     return len(set(losers)) == len(losers) and owner not in losers
 
 
-def _read_journal(path: str) -> dict:
-    def unique_pairs(pairs):
+def _read_journal(path: str) -> ClaimJournal:
+    def unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
         result = {}
         for key, value in pairs:
             if key in result:
@@ -98,10 +117,10 @@ def _read_journal(path: str) -> dict:
     claims = data["claims"]
     if any(not _valid_claim_record(key, record) for key, record in claims.items()):
         raise ClaimJournalError("Cannot read device ownership")
-    return claims
+    return cast(ClaimJournal, claims)
 
 
-def _write_journal(path: str, claims: dict) -> None:
+def _write_journal(path: str, claims: ClaimJournal) -> None:
     try:
         directory = os.path.dirname(path)
         if not os.path.isdir(directory):
@@ -130,13 +149,13 @@ async def read_device_owner(hass: HomeAssistant, key: str | None) -> str | None:
     path = hass.config.path(".storage", f"{DOMAIN}.claims")
 
     def read_owner() -> str | None:
-        record = _read_journal(path).get(key)
+        record = _read_journal(path).get(key) if key is not None else None
         return record["owner"] if record else None
 
     return await hass.async_add_executor_job(read_owner)
 
 
-async def load_journal(hass: HomeAssistant) -> dict:
+async def load_journal(hass: HomeAssistant) -> ClaimJournal:
     """Load the journal under the binding lock, without accepting corruption."""
     if JOURNAL_KEY not in hass.data:
         path = hass.config.path(".storage", f"{DOMAIN}.claims")
@@ -144,7 +163,7 @@ async def load_journal(hass: HomeAssistant) -> dict:
     return hass.data[JOURNAL_KEY]
 
 
-async def reload_journal(hass: HomeAssistant) -> dict:
+async def reload_journal(hass: HomeAssistant) -> ClaimJournal:
     """Reconcile external deletion or restoration before a binding decision."""
     hass.data.pop(JOURNAL_KEY, None)
     return await load_journal(hass)
@@ -156,10 +175,11 @@ async def save_election(
     """Durably reserve an election before its entry can be loaded."""
     claims = dict(await load_journal(hass))
     key = device_unique_id(dsn)
-    previous = claims.get(key, {})
-    historic = set(previous.get("losers", ())) | losers
-    if (old_owner := previous.get("owner")) and old_owner != owner:
-        historic.add(old_owner)
+    previous = claims.get(key)
+    historic = losers.copy()
+    if previous is not None:
+        historic.update(previous["losers"])
+        historic.add(previous["owner"])
     historic.discard(owner)
     claims[key] = {"owner": owner, "losers": sorted(historic)}
     path = hass.config.path(".storage", f"{DOMAIN}.claims")
@@ -190,13 +210,14 @@ def device_unique_id(dsn: str) -> str:
 
 def binding_lock(hass: HomeAssistant) -> asyncio.Lock:
     """Return the shared lock used by setup, repair and config flows."""
-    key = f"{DOMAIN}_binding_lock"
-    if key not in hass.data:
-        hass.data[key] = asyncio.Lock()
-    return hass.data[key]
+    if _BINDING_LOCK not in hass.data:
+        hass.data[_BINDING_LOCK] = asyncio.Lock()
+    return hass.data[_BINDING_LOCK]
 
 
-def client_settings_match(entry: ConfigEntry, client) -> bool:
+def client_settings_match(
+    entry: DeLonghiDehumidifierConfigEntry, client: APIClient
+) -> bool:
     """Compare only effective settings used to authenticate this client."""
     settings = {**entry.data, **entry.options}
     return all(
@@ -210,7 +231,7 @@ def client_settings_match(entry: ConfigEntry, client) -> bool:
 
 
 def _lifecycle_entries(hass: HomeAssistant, name: str) -> set[str]:
-    return hass.data.setdefault(f"{DOMAIN}_{name}", set())
+    return hass.data.setdefault(HassKey[set[str]](f"{DOMAIN}_{name}"), set())
 
 
 def unloading_entries(hass: HomeAssistant) -> set[str]:
@@ -240,7 +261,9 @@ def require_restart(hass: HomeAssistant, entry_id: str, dsn: object) -> None:
         restart_required_devices(hass).add(device_unique_id(dsn))
 
 
-def runtime_is_current(hass: HomeAssistant, entry: ConfigEntry, client) -> bool:
+def runtime_is_current(
+    hass: HomeAssistant, entry: DeLonghiDehumidifierConfigEntry, client: APIClient
+) -> bool:
     """Check the live runtime without treating rejected credentials as stale."""
     return (
         hass.config_entries.async_get_entry(entry.entry_id) is entry
@@ -254,7 +277,9 @@ def runtime_is_current(hass: HomeAssistant, entry: ConfigEntry, client) -> bool:
     )
 
 
-def registry_dsns(hass: HomeAssistant, entry: ConfigEntry) -> set[str]:
+def registry_dsns(
+    hass: HomeAssistant, entry: DeLonghiDehumidifierConfigEntry
+) -> set[str]:
     """Include disabled devices and preserve all pre-existing associations."""
     registry = dr.async_get(hass)
     return {
@@ -265,10 +290,10 @@ def registry_dsns(hass: HomeAssistant, entry: ConfigEntry) -> set[str]:
     }
 
 
-def claimants(hass: HomeAssistant, dsn: str) -> list[ConfigEntry]:
+def claimants(hass: HomeAssistant, dsn: str) -> list[DeLonghiDehumidifierConfigEntry]:
     """Find pinned and non-historical registry claimants, including disabled entries."""
     key = device_unique_id(dsn)
-    record = hass.data.get(JOURNAL_KEY, {}).get(key, {})
+    record: ClaimRecord | None = hass.data.get(JOURNAL_KEY, {}).get(key)
     result = []
     for entry in hass.config_entries.async_entries(DOMAIN):
         if (
@@ -276,7 +301,7 @@ def claimants(hass: HomeAssistant, dsn: str) -> list[ConfigEntry]:
             or entry.unique_id == key
             or (
                 key not in entry.data.get(CONF_HISTORICAL_CLAIMS, ())
-                and entry.entry_id not in record.get("losers", ())
+                and (record is None or entry.entry_id not in record["losers"])
                 and dsn in registry_dsns(hass, entry)
             )
         ):
@@ -296,7 +321,11 @@ def pending_claim(hass: HomeAssistant, dsn: str, *, exclude: str | None = None) 
 
 
 def _command_owner_matches(
-    hass: HomeAssistant, entry: ConfigEntry, dsn: str, client, record: dict | None
+    hass: HomeAssistant,
+    entry: DeLonghiDehumidifierConfigEntry,
+    dsn: str,
+    client: APIClient,
+    record: ClaimRecord | None,
 ) -> bool:
     """Require the journal, live entry and device binding to agree."""
     if record is None or record["owner"] != entry.entry_id:
@@ -307,7 +336,12 @@ def _command_owner_matches(
 
 
 @asynccontextmanager
-async def command_guard(hass: HomeAssistant, entry: ConfigEntry, dsn: str, client):
+async def command_guard(
+    hass: HomeAssistant,
+    entry: DeLonghiDehumidifierConfigEntry,
+    dsn: str,
+    client: APIClient,
+) -> AsyncIterator[None]:
     """Fence stale owners, and prevent transfer while a device POST is in flight."""
     async with binding_lock(hass):
 
@@ -345,7 +379,7 @@ async def command_guard(hass: HomeAssistant, entry: ConfigEntry, dsn: str, clien
                 translation_domain=DOMAIN,
                 translation_key="ownership_recovery",
             ) from None
-        commands = hass.data.setdefault(f"{DOMAIN}_active_commands", {})
+        commands = hass.data.setdefault(_COMMANDS, {})
         commands[entry.entry_id] = commands.get(entry.entry_id, 0) + 1
     try:
         yield
@@ -354,7 +388,9 @@ async def command_guard(hass: HomeAssistant, entry: ConfigEntry, dsn: str, clien
             commands[entry.entry_id] -= 1
 
 
-def create_binding_issue(hass: HomeAssistant, entry: ConfigEntry) -> None:
+def create_binding_issue(
+    hass: HomeAssistant, entry: DeLonghiDehumidifierConfigEntry
+) -> None:
     """Offer explicit recovery without revealing identifiers in issue metadata."""
     ir.async_create_issue(
         hass,
@@ -367,6 +403,8 @@ def create_binding_issue(hass: HomeAssistant, entry: ConfigEntry) -> None:
     )
 
 
-def clear_binding_issue(hass: HomeAssistant, entry: ConfigEntry) -> None:
+def clear_binding_issue(
+    hass: HomeAssistant, entry: DeLonghiDehumidifierConfigEntry
+) -> None:
     """Remove this entry's resolved ownership issue."""
     ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_PREFIX}{entry.entry_id}")

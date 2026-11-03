@@ -48,6 +48,10 @@ Use [black](https://github.com/ambv/black) to make sure the code follows the sty
 
 Use [flake8](https://pypi.org/project/flake8/) for linting.
 
+With the current Home Assistant test environment installed, run `python -m mypy`
+to check all integration modules against the Home Assistant API. The latest
+Home Assistant job in the validation workflow uses the same command.
+
 ## Test your code modification
 
 This component comes with development environment in a container, easy to launch
