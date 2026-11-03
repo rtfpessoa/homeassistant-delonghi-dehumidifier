@@ -7,7 +7,7 @@ import logging
 import time
 import urllib.parse
 from collections.abc import Callable
-from contextlib import nullcontext
+from contextlib import AbstractAsyncContextManager, nullcontext
 from datetime import datetime
 from enum import Enum
 from http import HTTPStatus
@@ -404,12 +404,52 @@ def usable_dsn(dsn: object) -> bool:
     return not any(ord(char) < 32 or ord(char) == 127 for char in dsn)
 
 
-def _login_token_from_response(response: str) -> str:
-    """Read the login token or identify a documented credentials error."""
-    data = json.loads(response)
-    if data.get("errorCode") == 403042:
-        raise InvalidCredentialsError("DeLonghi credentials were rejected")
-    return data["sessionInfo"]["login_token"]
+def _auth_status_error(status: int) -> HomeAssistantError:
+    return HomeAssistantError(
+        f"Unexpected DeLonghi authentication response (HTTP {status})"
+    )
+
+
+async def _auth_text(
+    request: AbstractAsyncContextManager[aiohttp.ClientResponse],
+) -> str:
+    """Read a successful auth body without following or disclosing a redirect."""
+    async with request as response:
+        _raise_for_transient_response(response)
+        if not 200 <= response.status < 300:
+            raise _auth_status_error(response.status)
+        return await response.text()
+
+
+async def _login_token(
+    request: AbstractAsyncContextManager[aiohttp.ClientResponse],
+) -> str:
+    """Only the provider's documented credential rejection triggers reauthentication."""
+    async with request as response:
+        _raise_for_transient_response(response)
+        if response.status not in (200, 400, 401, 403):
+            raise _auth_status_error(response.status)
+        data = json.loads(await response.text())
+        if data.get("errorCode") == 403042:
+            raise InvalidCredentialsError("DeLonghi credentials were rejected")
+        if response.status != 200:
+            raise _auth_status_error(response.status)
+        return data["sessionInfo"]["login_token"]
+
+
+async def _oauth_parameter(
+    request: AbstractAsyncContextManager[aiohttp.ClientResponse], parameter: str
+) -> str:
+    """Read one required OAuth redirect parameter, without visiting its location."""
+    async with request as response:
+        _raise_for_transient_response(response)
+        if response.status not in (301, 302, 303, 307, 308):
+            raise _auth_status_error(response.status)
+        query = urllib.parse.urlsplit(response.headers.get("Location", "")).query
+        values = urllib.parse.parse_qs(query, keep_blank_values=True).get(parameter, [])
+        if len(values) != 1 or not values[0]:
+            raise HomeAssistantError("Invalid DeLonghi authentication redirect")
+        return values[0]
 
 
 class APIClient:
@@ -853,6 +893,21 @@ class APIClient:
           str: The new access token.
 
         """
+        try:
+            return await self._refresh_or_login()
+        except (aiohttp.ClientError, TimeoutError):
+            # Transport exceptions can include the OAuth query string.
+            raise TransientCloudError(
+                "Unable to contact DeLonghi for authentication"
+            ) from None
+        except (LookupError, TypeError, ValueError, AttributeError):
+            # The provider's response can contain credentials or personal data.
+            raise HomeAssistantError(
+                "Invalid DeLonghi authentication response"
+            ) from None
+
+    async def _refresh_or_login(self) -> str:
+        """Refresh an existing token, using a full login when necessary."""
         if self.refresh_token is None or self.refresh_token == "":
             # If no refresh token is available, perform login and token acquisition
             return await self.get_new_refresh_token()
@@ -865,14 +920,15 @@ class APIClient:
             "Content-Type": "application/json",
         }
         body = {"user": {"refresh_token": self.refresh_token}}
-        async with self.session.post(url, headers=headers, json=body) as response:
+        async with self.session.post(
+            url, headers=headers, json=body, allow_redirects=False
+        ) as response:
             _raise_for_transient_response(response)
+            if 300 <= response.status < 400:
+                raise _auth_status_error(response.status)
             if response.status == 200:
                 data = await response.json()
-                self.refresh_token = data["refresh_token"]
-                self.access_token = data["access_token"]
-                self.token_expiry = time.time() + int(data["expires_in"])
-                return self.access_token
+                return self._store_tokens(data)
 
             _LOGGER.warning(
                 "Failed to refresh access token (HTTP %s); falling back to login",
@@ -914,12 +970,12 @@ class APIClient:
             "scope": "openid email profile UID comfort en alexa",
             "nonce": str(int(datetime.now().timestamp())),
         }
-        response = await self.session.get(
-            url, headers=headers, params=params, allow_redirects=False
+        context = await _oauth_parameter(
+            self.session.get(
+                url, headers=headers, params=params, allow_redirects=False
+            ),
+            "context",
         )
-        _raise_for_transient_response(response)
-        location = response.headers.get("Location")
-        context = await self.get_query_param(location, "context")
 
         # Step 2: Fetch Gigya session data
         url = "https://socialize.eu1.gigya.com/socialize.getIDs"
@@ -932,10 +988,13 @@ class APIClient:
             "sdkBuild": SDK_BUILD,
             "format": "json",
         }
-        response = await self.session.get(url, headers=headers, params=params)
-        _raise_for_transient_response(response)
-        response = await response.text()
-        response = json.loads(response)
+        response = json.loads(
+            await _auth_text(
+                self.session.get(
+                    url, headers=headers, params=params, allow_redirects=False
+                )
+            )
+        )
 
         ucid = response["ucid"]
         gmid = response["gmid"]
@@ -1008,9 +1067,9 @@ class APIClient:
             "sdkBuild": SDK_BUILD,
             "format": "json",
         }
-        response = await self.session.post(url, headers=headers, data=data)
-        _raise_for_transient_response(response)
-        login_token = _login_token_from_response(await response.text())
+        login_token = await _login_token(
+            self.session.post(url, headers=headers, data=data, allow_redirects=False)
+        )
 
         # Step 4: Get user info
         url = "https://socialize.eu1.gigya.com/socialize.getUserInfo"
@@ -1027,10 +1086,13 @@ class APIClient:
             "sdkBuild": SDK_BUILD,
             "format": "json",
         }
-        response = await self.session.post(url, headers=headers, data=data)
-        _raise_for_transient_response(response)
-        response = await response.text()
-        response = json.loads(response)
+        response = json.loads(
+            await _auth_text(
+                self.session.post(
+                    url, headers=headers, data=data, allow_redirects=False
+                )
+            )
+        )
 
         user_uid = response["UID"]
         user_uid_signature = response["UIDSignature"]
@@ -1048,9 +1110,9 @@ class APIClient:
             "UIDSignature": user_uid_signature,
             "signatureTimestamp": user_signature_timestamp,
         }
-        response = await self.session.get(url, headers=headers, params=params)
-        _raise_for_transient_response(response)
-        response = await response.text()
+        response = await _auth_text(
+            self.session.get(url, headers=headers, params=params, allow_redirects=False)
+        )
 
         signature = response.split("const consentObj2Sig = '")[1].split("';")[0]
 
@@ -1073,16 +1135,16 @@ class APIClient:
             "sig": signature,
             "gmidTicket": gmid_ticket,
         }
-        response = await self.session.get(
-            url, headers=headers, params=params, allow_redirects=False
+        code = await _oauth_parameter(
+            self.session.get(
+                url, headers=headers, params=params, allow_redirects=False
+            ),
+            "code",
         )
-        _raise_for_transient_response(response)
-        location = response.headers.get("Location")
-        code = await self.get_query_param(location, "code")
 
         return await self._exchange_authorization_code(code)
 
-    async def _exchange_authorization_code(self, code: str | None) -> str:
+    async def _exchange_authorization_code(self, code: str) -> str:
         """Exchange the authorization code for IDP and Ayla access tokens."""
         # Step 7: Get IDP access token
         url = f"https://fidm.eu1.gigya.com/oidc/op/v1.0/{API_KEY}/token"
@@ -1096,10 +1158,13 @@ class APIClient:
             "grant_type": "authorization_code",
             "redirect_uri": "https://google.it",
         }
-        response = await self.session.post(url, headers=headers, data=data)
-        _raise_for_transient_response(response)
-        response = await response.text()
-        response = json.loads(response)
+        response = json.loads(
+            await _auth_text(
+                self.session.post(
+                    url, headers=headers, data=data, allow_redirects=False
+                )
+            )
+        )
 
         idp_token = response["access_token"]
 
@@ -1111,16 +1176,31 @@ class APIClient:
             "app_secret": APP_SECRET,
             "token": idp_token,
         }
-        response = await self.session.post(url, headers=headers, data=data)
-        _raise_for_transient_response(response)
-        response = await response.text()
-        response = json.loads(response)
+        response = json.loads(
+            await _auth_text(
+                self.session.post(
+                    url, headers=headers, data=data, allow_redirects=False
+                )
+            )
+        )
 
-        self.access_token = response["access_token"]
-        self.refresh_token = response["refresh_token"]
-        self.token_expiry = time.time() + int(response["expires_in"])
+        return self._store_tokens(response)
 
-        return self.access_token
+    def _store_tokens(self, response: dict[str, str | int]) -> str:
+        """Keep the previous tokens if the new response cannot be used."""
+        access_token, refresh_token = (
+            response["access_token"],
+            response["refresh_token"],
+        )
+        if not isinstance(access_token, str) or not isinstance(refresh_token, str):
+            raise HomeAssistantError("Invalid DeLonghi authentication response")
+        if not access_token:
+            return ""  # The caller treats an empty token as an unconfirmed login.
+        expiry = time.time() + int(response["expires_in"])
+        self.access_token = access_token
+        self.refresh_token = refresh_token
+        self.token_expiry = expiry
+        return access_token
 
     @staticmethod
     async def _read_response(response: aiohttp.ClientResponse) -> dict:
@@ -1346,22 +1426,6 @@ class APIClient:
             self._properties_idle.set()
         if not request.cancelled():
             request.exception()
-
-    async def get_query_param(self, url: str, param: str) -> str | None:
-        """Extract the value of a specified query parameter from a given URL.
-
-        Args:
-          url (str): The URL containing the query parameters.
-          param (str): The name of the query parameter to retrieve.
-
-        Returns:
-          str or None: The value of the specified query parameter if it exists,
-                 otherwise None.
-
-        """
-        query = urllib.parse.urlparse(url).query
-        params = urllib.parse.parse_qs(query)
-        return params.get(param, [None])[0]
 
     async def url_encode(self, value: str) -> str:
         """URL-encodes a given string.

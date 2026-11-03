@@ -2,8 +2,9 @@
 
 import json
 import logging
+import traceback
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from urllib.parse import urlsplit
 
 import aiohttp
@@ -14,6 +15,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.delonghi_dehumidifier_api.client import (
     APIClient,
+    InvalidCredentialsError,
     OffOnStatus,
     Status,
     TransientCloudError,
@@ -304,6 +306,12 @@ class AuthenticationResponse:
         self.released = False
         self.text_calls = 0
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        self.release()
+
     async def text(self):
         self.text_calls += 1
         return self.body
@@ -346,8 +354,8 @@ def authentication_session(failing_step=None, status=503):
         )
     return (
         SimpleNamespace(
-            get=AsyncMock(side_effect=[responses[i] for i in (0, 1, 4, 5)]),
-            post=AsyncMock(side_effect=[responses[i] for i in (2, 3, 6, 7)]),
+            get=Mock(side_effect=[responses[i] for i in (0, 1, 4, 5)]),
+            post=Mock(side_effect=[responses[i] for i in (2, 3, 6, 7)]),
         ),
         responses,
     )
@@ -362,7 +370,7 @@ async def test_authentication_stops_on_transient_response(step, status, caplog):
     caplog.set_level(logging.DEBUG)
     with pytest.raises(TransientCloudError, match=f"HTTP {status}") as error:
         await client.authenticate()
-    assert session.get.await_count + session.post.await_count == step + 1
+    assert session.get.call_count + session.post.call_count == step + 1
     assert responses[step].text_calls == 0
     assert responses[step].released
     assert "provider-secret" not in str(error.value)
@@ -378,11 +386,164 @@ async def test_authentication_recovers_after_transient_response():
     client = APIClient(session, "en", "user@example.com", "password")
     with pytest.raises(TransientCloudError):
         await client.authenticate()
-    session, _ = authentication_session()
+    session, responses = authentication_session()
     client.session = session
     assert await client.authenticate()
-    assert session.get.await_args_list[0].kwargs["allow_redirects"] is False
-    assert session.get.await_args_list[3].kwargs["allow_redirects"] is False
+    assert all(response.released for response in responses)
+    assert all(
+        call.kwargs["allow_redirects"] is False
+        for call in session.get.call_args_list + session.post.call_args_list
+    )
+
+
+@pytest.mark.parametrize("step", [1, 2, 3, 4, 6, 7, "refresh"])
+@pytest.mark.parametrize("status", [307, 308])
+async def test_authentication_never_replays_request_at_redirect_target(
+    step, status, socket_enabled, caplog
+):
+    """A second HTTP origin must never receive credentials or token requests."""
+    _, responses = authentication_session()
+    trusted_paths = []
+    forwarded = []
+
+    async def receiver(request):
+        forwarded.append(request.method)
+        return web.Response()
+
+    recipient = web.Application()
+    recipient.router.add_route("*", "/{path:.*}", receiver)
+    async with TestServer(recipient) as destination:
+
+        async def provider(request):
+            index = len(trusted_paths)
+            trusted_paths.append(request.path)
+            if step == "refresh" or index == step:
+                return web.Response(
+                    status=status,
+                    headers={"Location": str(destination.make_url("/private-target"))},
+                    text="private-response",
+                )
+            expected = responses[index]
+            return web.Response(
+                status=expected.status, headers=expected.headers, text=expected.body
+            )
+
+        app = web.Application()
+        app.router.add_route("*", "/{path:.*}", provider)
+        async with TestServer(app) as server, aiohttp.ClientSession() as transport:
+
+            class LocalSession:
+                def get(self, url, **kwargs):
+                    return transport.get(server.make_url(urlsplit(url).path), **kwargs)
+
+                def post(self, url, **kwargs):
+                    return transport.post(server.make_url(urlsplit(url).path), **kwargs)
+
+            client = APIClient(
+                LocalSession(), "en", "private-email", "private-password"
+            )
+            if step == "refresh":
+                client.refresh_token = "private-refresh-token"
+            with pytest.raises(HomeAssistantError, match=f"HTTP {status}") as error:
+                await client.authenticate()
+            assert not client.invalid_credentials
+            assert client.access_token is None
+            await client.async_shutdown()
+
+    assert forwarded == []
+    assert len(trusted_paths) == (1 if step == "refresh" else step + 1)
+    for private in (
+        "private-target",
+        "private-response",
+        "private-password",
+        "private-refresh-token",
+    ):
+        assert private not in str(error.value)
+        assert private not in caplog.text
+
+
+@pytest.mark.parametrize(("step", "key"), [(0, "context"), (5, "code")])
+@pytest.mark.parametrize(
+    ("status", "query"),
+    [(200, "value"), (302, ""), (302, "duplicate"), (302, "missing")],
+)
+async def test_oauth_redirect_requires_a_single_nonempty_parameter(
+    step, key, status, query
+):
+    session, responses = authentication_session()
+    response = responses[step]
+    response.status = status
+    response.headers = {"Location": f"https://secret-location.invalid/?{key}={query}"}
+    if query == "duplicate":
+        response.headers["Location"] += f"&{key}=second"
+    elif query == "missing":
+        response.headers.clear()
+    client = APIClient(session, "en", "test@example.com", "secret")
+    with pytest.raises(HomeAssistantError) as error:
+        await client.authenticate()
+    assert response.released
+    assert response.text_calls == 0
+    assert session.get.call_count + session.post.call_count == step + 1
+    assert "secret-location" not in str(error.value)
+    assert not client.invalid_credentials
+
+
+@pytest.mark.parametrize(
+    ("body", "error_type"),
+    [
+        ({"errorCode": 403042}, InvalidCredentialsError),
+        ({"sessionInfo": {"login_token": "private-invalid-token"}}, HomeAssistantError),
+    ],
+)
+async def test_rejected_login_is_never_accepted(body, error_type):
+    session, responses = authentication_session(2, 403)
+    responses[2].body = json.dumps(body)
+    client = APIClient(session, "en", "test@example.com", "secret")
+    with pytest.raises(error_type) as error:
+        await client.authenticate()
+    assert type(error.value) is error_type
+    assert client.invalid_credentials is (error_type is InvalidCredentialsError)
+    assert session.post.call_count == 1
+    assert responses[2].released
+    assert "private-invalid-token" not in str(error.value)
+
+
+async def test_empty_access_token_does_not_replace_cached_credentials():
+    session, responses = authentication_session()
+    responses[-1].body = json.dumps(
+        {"access_token": "", "refresh_token": "new-refresh", "expires_in": 60}
+    )
+    client = APIClient(session, "en", "test@example.com", "secret")
+    client.access_token = "previous-access"
+    assert not await client.authenticate()
+    assert client.access_token == "previous-access"
+    assert client.refresh_token is None
+
+
+@pytest.mark.parametrize("transport_failure", [False, True])
+async def test_authentication_failure_hides_provider_data(transport_failure):
+    session, responses = authentication_session()
+    if transport_failure:
+        session.get.side_effect = aiohttp.ClientConnectionError("private-provider-data")
+    else:
+        responses[-1].body = json.dumps(
+            {
+                "access_token": "new",
+                "refresh_token": "new",
+                "expires_in": "private-provider-data",
+            }
+        )
+    client = APIClient(session, "en", "test@example.com", "secret")
+    with pytest.raises(HomeAssistantError) as error:
+        await client.authenticate()
+    assert "private-provider-data" not in "".join(
+        traceback.format_exception(error.value)
+    )
+    assert not client.invalid_credentials
+    assert client.access_token is None
+    assert client.refresh_token is None
+    if not transport_failure:
+        assert all(response.released for response in responses)
 
 
 @pytest.mark.parametrize("status", [429, 503])
