@@ -20,27 +20,34 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import issue_registry as ir
 
+from . import DeLonghiDehumidifierConfigEntry, _async_update_options
 from .client import (
     APIClient,
     DeviceNotAvailableError,
     InvalidCredentialsError,
     NoDevicesError,
     TransientCloudError,
+    usable_dsn,
 )
 from .const import DOMAIN, RUNTIME_REAUTH_ID
 from .identity import (
     CONF_DSN,
     CONF_ENROLLMENT,
     CONF_TRANSFER,
+    ISSUE_PREFIX,
     ClaimJournalError,
     binding_lock,
     claimants,
+    create_binding_issue,
     device_needs_restart,
     device_unique_id,
     pending_claim,
+    read_device_owner,
     reload_journal,
     reserve_enrollment,
+    restart_required_entries,
     runtime_is_current,
 )
 
@@ -55,26 +62,32 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-async def validate_input(
+async def _validate_device_settings(
     hass: HomeAssistant, data: dict[str, Any], dsn: str
-) -> dict[str, Any]:
-    """Validate the user input allows us to connect.
-
-    Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
-    """
-
-    session = aiohttp_client.async_get_clientsession(hass)
+) -> tuple[str, str | None]:
+    """Return the verified device title or a safe form error."""
     client = APIClient(
-        session, data[CONF_LANGUAGE], data[CONF_EMAIL], data[CONF_PASSWORD]
+        aiohttp_client.async_get_clientsession(hass),
+        data[CONF_LANGUAGE],
+        data[CONF_EMAIL],
+        data[CONF_PASSWORD],
     )
     try:
-        authenticated = await client.authenticate()
-        if not authenticated:
-            raise InvalidAuth
+        if not await client.authenticate():
+            return "", "invalid_auth"
         await client.verify_device(dsn)
-        return {"title": await client.get_product_name()}
-    except InvalidCredentialsError as err:
-        raise InvalidAuth from err
+        return await client.get_product_name(), None
+    except InvalidCredentialsError:
+        return "", "invalid_auth"
+    except (aiohttp.ClientError, TimeoutError, TransientCloudError):
+        return "", "cannot_connect"
+    except NoDevicesError:
+        return "", "no_devices"
+    except DeviceNotAvailableError:
+        return "", "device_not_available"
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.error("Unexpected device validation failure (%s)", type(err).__name__)
+        return "", "unknown"
     finally:
         await client.async_shutdown()
 
@@ -83,6 +96,16 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for DeLonghi Dehumidifier."""
 
     VERSION = 2
+
+    _account_edit: _AccountEdit | None = None
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change the account settings for this entry’s selected appliance."""
+        if self._account_edit is None:
+            self._account_edit = _AccountEdit(self._get_reconfigure_entry())
+        return await self._account_edit.async_step(self, user_input)
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         """Start reauthentication for the existing entry."""
@@ -242,21 +265,9 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _select_device(self, dsn: str) -> ConfigFlowResult:
         """Verify a selection again, then reserve its identity before creating an entry."""
-        try:
-            info = await validate_input(self.hass, self._settings, dsn)
-        except InvalidAuth:
-            error = "invalid_auth"
-        except (aiohttp.ClientError, TimeoutError, TransientCloudError):
-            error = "cannot_connect"
-        except NoDevicesError:
-            error = "no_devices"
-        except DeviceNotAvailableError:
-            error = "device_not_available"
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.error("Unexpected selection failure (%s)", type(err).__name__)
-            error = "unknown"
-        else:
-            return await self._enroll_selected_device(dsn, info["title"])
+        title, error = await _validate_device_settings(self.hass, self._settings, dsn)
+        if error is None:
+            return await self._enroll_selected_device(dsn, title)
         return self.async_show_form(
             step_id="select_device",
             data_schema=self._selection_schema(),
@@ -321,46 +332,85 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class DeLonghiOptionsFlow(config_entries.OptionsFlow):
+    """Retain the Configure entry point for existing installations."""
+
+    _account_edit: _AccountEdit | None = None
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Manage the options."""
+        """Edit the same account settings as the reconfiguration flow."""
+        if self._account_edit is None:
+            self._account_edit = _AccountEdit(self.config_entry)
+        return await self._account_edit.async_step(self, user_input)
+
+
+class _AccountEdit:
+    """A settings form stays bound to the entry as it was when opened."""
+
+    def __init__(self, entry: DeLonghiDehumidifierConfigEntry) -> None:
+        self.entry = entry
+        self.data = entry.data
+        self.options = entry.options
+        self.unique_id = entry.unique_id
+        self.disabled_by = entry.disabled_by
+
+    def _settings_changed(self, hass: HomeAssistant) -> bool:
+        entry = self.entry
+        return (
+            hass.config_entries.async_get_entry(entry.entry_id) is not entry
+            or entry.data != self.data
+            or entry.options != self.options
+            or entry.unique_id != self.unique_id
+            or entry.disabled_by != self.disabled_by
+        )
+
+    async def _abort_reason(self, hass: HomeAssistant) -> str | None:
+        entry = self.entry
+        try:
+            owner = await read_device_owner(hass, self.unique_id)
+        except ClaimJournalError:
+            owner = None
+        if self._settings_changed(hass):
+            return "settings_changed"
+        dsn = self.data.get(CONF_DSN)
+        if entry.entry_id in restart_required_entries(hass) or device_needs_restart(
+            hass, dsn
+        ):
+            return "restart_required"
+        if (
+            owner != entry.entry_id
+            or not usable_dsn(dsn)
+            or self.unique_id != device_unique_id(dsn)
+            or any(owner is not entry for owner in claimants(hass, dsn))
+        ):
+            create_binding_issue(hass, entry)
+            return "device_binding_required"
+        if ir.async_get(hass).async_get_issue(
+            DOMAIN, f"{ISSUE_PREFIX}{entry.entry_id}"
+        ):
+            return "device_binding_required"
+        return None
+
+    async def async_step(
+        self,
+        flow: DeLonghiConfigFlow | DeLonghiOptionsFlow,
+        user_input: dict[str, Any] | None,
+    ) -> ConfigFlowResult:
+        if reason := await self._abort_reason(flow.hass):
+            return flow.async_abort(reason=reason)
         errors: dict[str, str] = {}
         if user_input is not None:
-            original_data, original_options = dict(self.config_entry.data), dict(
-                self.config_entry.options
+            title, error = await _validate_device_settings(
+                flow.hass, user_input, self.data[CONF_DSN]
             )
-            try:
-                info = await validate_input(
-                    self.hass, user_input, self.config_entry.data[CONF_DSN]
-                )
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except (aiohttp.ClientError, TimeoutError, TransientCloudError):
-                errors["base"] = "cannot_connect"
-            except NoDevicesError:
-                errors["base"] = "no_devices"
-            except DeviceNotAvailableError:
-                errors["base"] = "device_not_available"
-            except Exception as err:  # noqa: BLE001
-                _LOGGER.error("Unexpected options failure (%s)", type(err).__name__)
-                errors["base"] = "unknown"
-            else:
-                if (
-                    self.hass.config_entries.async_get_entry(self.config_entry.entry_id)
-                    is not self.config_entry
-                    or self.config_entry.data != original_data
-                    or self.config_entry.options != original_options
-                ):
-                    return self.async_abort(reason="reauth_settings_changed")
-                return self.async_create_entry(
-                    title=info["title"],
-                    data={**self.config_entry.options, **user_input},
-                )
+            if error is None:
+                return await self._finish(flow, user_input, title)
+            errors["base"] = error
 
-        settings = {**self.config_entry.data, **self.config_entry.options}
-        return self.async_show_form(
-            step_id="init",
+        settings = {**self.data, **self.options}
+        return flow.async_show_form(
+            step_id="init" if isinstance(flow, OptionsFlow) else "reconfigure",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_LANGUAGE, default=settings[CONF_LANGUAGE]): str,
@@ -370,6 +420,38 @@ class DeLonghiOptionsFlow(config_entries.OptionsFlow):
             ),
             errors=errors,
         )
+
+    async def _finish(
+        self,
+        flow: DeLonghiConfigFlow | DeLonghiOptionsFlow,
+        settings: dict[str, Any],
+        title: str,
+    ) -> ConfigFlowResult:
+        if reason := await self._abort_reason(flow.hass):
+            return flow.async_abort(reason=reason)
+        entries = flow.hass.config_entries
+        manager = entries.options if isinstance(flow, OptionsFlow) else entries.flow
+        if not any(
+            item["flow_id"] == flow.flow_id
+            for item in manager.async_progress_by_handler(flow.handler)
+        ):
+            return flow.async_abort(reason="settings_changed")
+        updates = {
+            key: settings[key] for key in (CONF_LANGUAGE, CONF_EMAIL, CONF_PASSWORD)
+        }
+        options = {
+            key: value for key, value in self.options.items() if key not in updates
+        }
+        # An eager update listener can unload itself before async_update_entry returns.
+        reload_listener = _async_update_options in self.entry.update_listeners
+        changed = entries.async_update_entry(
+            self.entry, data={**self.data, **updates}, options=options
+        )
+        if not self.entry.disabled_by and (not changed or not reload_listener):
+            entries.async_schedule_reload(self.entry.entry_id)
+        if isinstance(flow, OptionsFlow):
+            return flow.async_create_entry(title=title, data=options)
+        return flow.async_abort(reason="reconfigure_successful")
 
 
 class InvalidAuth(HomeAssistantError):

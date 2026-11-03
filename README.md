@@ -60,7 +60,7 @@ hash when reporting an issue with a branch installation. See the
 | Email and password | The credentials you use to sign in to the De’Longhi app that lists the appliance. |
 | Device | Choose the identifier of the appliance you want this entry to control. The choices come from your signed-in account. |
 
-To change account settings on an existing entry, open **Settings > Devices & services**, find the integration and choose **Configure**. The form asks for the account language, email and password again. The new credentials must have access to the same appliance.
+To change account settings, open **Settings > Devices & services**, open the appliance entry menu and choose **Reconfigure**. **Configure** opens the same form. Enter the account language, email and current password for an account that can access the same appliance.
 
 Each entry remains bound to its selected device. Changing credentials or the
 account language requires that the same device is accessible to the new account.

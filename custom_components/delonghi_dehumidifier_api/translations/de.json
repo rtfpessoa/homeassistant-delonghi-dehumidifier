@@ -22,6 +22,19 @@
         "data": {
           "device_dsn": "Gerät"
         }
+      },
+      "reconfigure": {
+        "description": "Ändere die Anmeldedaten für das bereits ausgewählte Gerät.",
+        "data": {
+          "language": "Sprache des De'Longhi-Kontos",
+          "email": "E-Mail-Adresse",
+          "password": "Passwort"
+        },
+        "data_description": {
+          "language": "Sprachcode, der bei der Anmeldung an De'Longhi gesendet wird.",
+          "email": "Das Konto muss Zugriff auf das bereits ausgewählte Gerät haben.",
+          "password": "Gib das aktuelle Passwort für dieses Konto ein."
+        }
       }
     },
     "error": {
@@ -37,7 +50,10 @@
       "restart_required": "Starte Home Assistant neu, bevor du dieses Gerät erneut einrichtest.",
       "reauth_successful": "Die erneute Anmeldung war erfolgreich.",
       "reauth_settings_changed": "Die Integrationseinstellungen wurden geändert. Bitte starte den Anmeldevorgang erneut.",
-      "reauth_cancelled": "Die erneute Anmeldung wurde abgebrochen."
+      "reauth_cancelled": "Die erneute Anmeldung wurde abgebrochen.",
+      "settings_changed": "Die Einstellungen wurden geändert oder das Formular wurde geschlossen. Öffne das Formular erneut.",
+      "device_binding_required": "Bestätige zuerst die Gerätezuordnung unter Einstellungen > System > Reparaturen.",
+      "reconfigure_successful": "Die Kontoeinstellungen wurden aktualisiert."
     }
   },
   "options": {
@@ -49,7 +65,9 @@
           "password": "Passwort"
         },
         "data_description": {
-          "language": "Sprachcode, der bei der Anmeldung an De'Longhi gesendet wird."
+          "language": "Sprachcode, der bei der Anmeldung an De'Longhi gesendet wird.",
+          "email": "Das Konto muss Zugriff auf das bereits ausgewählte Gerät haben.",
+          "password": "Gib das aktuelle Passwort für dieses Konto ein."
         }
       }
     },
@@ -61,7 +79,10 @@
       "device_not_available": "Das ausgewählte Gerät ist in diesem Konto nicht verfügbar."
     },
     "abort": {
-      "reauth_settings_changed": "Die Integrationseinstellungen wurden geändert. Bitte starte die Optionen erneut."
+      "reauth_settings_changed": "Die Integrationseinstellungen wurden geändert. Bitte starte die Optionen erneut.",
+      "settings_changed": "Die Einstellungen wurden geändert oder das Formular wurde geschlossen. Öffne das Formular erneut.",
+      "device_binding_required": "Bestätige zuerst die Gerätezuordnung unter Einstellungen > System > Reparaturen.",
+      "restart_required": "Starte Home Assistant neu, bevor du dieses Gerät erneut einrichtest."
     }
   },
   "entity": {

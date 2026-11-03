@@ -22,6 +22,19 @@
         "data": {
           "device_dsn": "Device"
         }
+      },
+      "reconfigure": {
+        "description": "Update the connection settings for the appliance already selected for this entry.",
+        "data": {
+          "language": "De'Longhi account language",
+          "email": "Email",
+          "password": "Password"
+        },
+        "data_description": {
+          "language": "Language code sent to De'Longhi when signing in.",
+          "email": "The account must have access to the appliance selected for this entry.",
+          "password": "Enter the current password for this account."
+        }
       }
     },
     "error": {
@@ -37,7 +50,10 @@
       "restart_required": "Restart Home Assistant before setting up this device again.",
       "reauth_successful": "Reauthentication was successful.",
       "reauth_settings_changed": "The integration settings changed. Please start reauthentication again.",
-      "reauth_cancelled": "Reauthentication was cancelled."
+      "reauth_cancelled": "Reauthentication was cancelled.",
+      "settings_changed": "The settings changed or the form was closed. Reopen the form to try again.",
+      "device_binding_required": "Confirm the device binding under Settings > System > Repairs first.",
+      "reconfigure_successful": "Account settings updated."
     }
   },
   "options": {
@@ -49,7 +65,9 @@
           "password": "Password"
         },
         "data_description": {
-          "language": "Language code sent to De'Longhi when signing in."
+          "language": "Language code sent to De'Longhi when signing in.",
+          "email": "The account must have access to the appliance selected for this entry.",
+          "password": "Enter the current password for this account."
         }
       }
     },
@@ -61,7 +79,10 @@
       "device_not_available": "The selected device is not available on this account."
     },
     "abort": {
-      "reauth_settings_changed": "The integration settings changed. Please open the options again."
+      "reauth_settings_changed": "The integration settings changed. Please open the options again.",
+      "settings_changed": "The settings changed or the form was closed. Reopen the form to try again.",
+      "device_binding_required": "Confirm the device binding under Settings > System > Repairs first.",
+      "restart_required": "Restart Home Assistant before setting up this device again."
     }
   },
   "entity": {
