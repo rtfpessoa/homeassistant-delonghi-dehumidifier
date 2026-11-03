@@ -2,10 +2,80 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable, Coroutine
+from functools import wraps
+from typing import Any
 
+import aiohttp
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity import Entity
 
-from .client import APIClient, InvalidCredentialsError, is_poll_connection_error
+from .client import (
+    APIClient,
+    InvalidCredentialsError,
+    TransientCloudError,
+    is_poll_connection_error,
+)
+from .const import DOMAIN
+
+_COMMAND_ERROR_KEYS = frozenset(
+    {
+        "cloud_permission_denied",
+        "command_connection_failed",
+        "command_failed",
+        "credentials_rejected",
+        "device_removed",
+        "ownership_recovery",
+        "real_feel_enter_write_failed",
+        "real_feel_mode_not_ready",
+        "real_feel_read_failed",
+        "real_feel_unsupported",
+        "real_feel_write_failed",
+        "restart_required",
+        "settings_changing",
+        "unsupported_mode",
+    }
+)
+
+
+def command_error(err: Exception, fallback: str) -> HomeAssistantError:
+    """Only copy recognized local reasons; exceptions, causes and placeholders may contain secrets."""
+    key = fallback
+    if (
+        isinstance(err, HomeAssistantError)
+        and err.translation_domain == DOMAIN
+        and err.translation_key in _COMMAND_ERROR_KEYS
+    ):
+        key = err.translation_key
+    kind = (
+        ServiceValidationError
+        if isinstance(err, ServiceValidationError)
+        else HomeAssistantError
+    )
+    return kind(translation_domain=DOMAIN, translation_key=key)
+
+
+def translate_command_errors[**P](
+    action: Callable[P, Awaitable[None]],
+) -> Callable[P, Coroutine[Any, Any, None]]:
+    """Report action failures to Home Assistant without disclosing cloud data."""
+
+    @wraps(action)
+    async def run(*args: P.args, **kwargs: P.kwargs) -> None:
+        try:
+            await action(*args, **kwargs)
+        except InvalidCredentialsError:
+            raise InvalidCredentialsError(
+                translation_domain=DOMAIN, translation_key="credentials_rejected"
+            ) from None
+        except (aiohttp.ClientError, TimeoutError, TransientCloudError):
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="command_connection_failed"
+            ) from None
+        except Exception as err:  # noqa: BLE001 - redact arbitrary command failures
+            raise command_error(err, "command_failed") from None
+
+    return run
 
 
 class AuthAvailabilityEntity(Entity):

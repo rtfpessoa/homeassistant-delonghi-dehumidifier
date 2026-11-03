@@ -10,7 +10,7 @@ from homeassistant.components.humidifier.const import HumidifierEntityFeature
 from homeassistant.components.logbook import async_log_entry
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.translation import async_get_translations
@@ -26,7 +26,7 @@ from .client import (
     parse_integer_state,
 )
 from .const import DOMAIN, REAL_FEEL_ACTIVATION_PAYLOAD, REAL_FEEL_DEACTIVATION_PAYLOAD
-from .entity import AuthAvailabilityEntity
+from .entity import AuthAvailabilityEntity, command_error, translate_command_errors
 from .real_feel import property_value, supports_real_feel
 from .utils import fetch_device_info
 
@@ -260,6 +260,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
         if message := translations.get(key):
             async_log_entry(self.hass, "De'Longhi", message, entity_id=self.entity_id)
 
+    @translate_command_errors
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the entity on."""
         _LOGGER.debug("Turning on humidifier")
@@ -267,6 +268,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
             lambda: self.client.set_status(Status.ON)
         )
 
+    @translate_command_errors
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the entity off."""
         _LOGGER.debug("Turning off humidifier")
@@ -274,12 +276,15 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
             lambda: self.client.set_status(Status.OFF)
         )
 
+    @translate_command_errors
     async def async_set_mode(self, mode: str) -> None:
         """Set new target mode."""
         _LOGGER.debug("Setting humidifier mode")
         target = MODE_BY_NAME.get(mode)
         if target is None:
-            raise ServiceValidationError("Unsupported dehumidifier mode")
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="unsupported_mode"
+            )
         tested_device = False
         source_mode: str | None = None
         lifetime = self._lifetime_generation
@@ -327,12 +332,8 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
             properties = await self.client.get_properties()
         except InvalidCredentialsError:
             raise
-        except Exception:  # noqa: BLE001 - do not expose cloud response details
-            raise HomeAssistantError(
-                "Unable to check the current device data. Check the connection and try again.",
-                translation_domain=DOMAIN,
-                translation_key="real_feel_read_failed",
-            ) from None
+        except Exception as err:  # noqa: BLE001 - redact unknown cloud exceptions
+            raise command_error(err, "real_feel_read_failed") from None
         self._ensure_not_removed(lifetime)
         if deadline is not None and read_started < deadline <= self.hass.loop.time():
             self._expire_due_pending()
@@ -371,19 +372,13 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
             return await self.client.request_enter_real_feel()
         except InvalidCredentialsError:
             raise
-        except Exception:  # noqa: BLE001 - avoid cloud response details
-            what = "exit request" if exit_mode else "request"
+        except Exception as err:  # noqa: BLE001 - redact unknown write failures
             key = (
                 "real_feel_write_failed"
                 if exit_mode
                 else "real_feel_enter_write_failed"
             )
-            raise HomeAssistantError(
-                f"The Real Feel {what} failed; the device may have received it. "
-                "Check the De'Longhi app before trying again.",
-                translation_domain=DOMAIN,
-                translation_key=key,
-            ) from None
+            raise command_error(err, key) from None
 
     def _clear_pending(self) -> None:
         """Clear a mode request and prevent an older timeout from affecting a later one."""
@@ -499,6 +494,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
             return observed
         return None
 
+    @translate_command_errors
     async def async_set_humidity(self, humidity: int) -> None:
         """Set new target humidity."""
         _LOGGER.debug("Setting target humidity")

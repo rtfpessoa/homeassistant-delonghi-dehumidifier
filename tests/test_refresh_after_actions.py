@@ -207,7 +207,7 @@ async def test_ambiguous_write_still_refreshes_without_retry(hass, device, outco
         await asyncio.wait_for(started.wait(), 2)
         if outcome == "cancel":
             command.cancel()
-        with pytest.raises((TimeoutError, asyncio.CancelledError)):
+        with pytest.raises((HomeAssistantError, asyncio.CancelledError)):
             await command
         reads = get.await_count
         await wait_for_state(hass, eco_sensor, "ON")

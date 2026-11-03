@@ -26,15 +26,14 @@ async def test_invalid_mode_rejected_without_a_command(hass, device, mode):
     with patch.object(
         entry.runtime_data, "set_mode", wraps=entry.runtime_data.set_mode
     ) as send:
-        with pytest.raises(
-            ServiceValidationError, match="Unsupported dehumidifier mode"
-        ):
+        with pytest.raises(ServiceValidationError) as error:
             await hass.services.async_call(
                 "humidifier",
                 "set_mode",
                 {"entity_id": entity_id, "mode": mode},
                 blocking=True,
             )
+        assert error.value.translation_key == "unsupported_mode"
         send.assert_not_awaited()
 
     post.assert_not_awaited()

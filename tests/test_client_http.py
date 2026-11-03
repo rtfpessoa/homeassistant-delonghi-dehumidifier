@@ -107,7 +107,7 @@ async def test_rejected_switch_write_does_not_change_state():
 
     assert switch.is_on is False
     assert error is not None
-    assert "403" in str(error)
+    assert error.translation_key == "cloud_permission_denied"
     assert session.request.closed
 
 

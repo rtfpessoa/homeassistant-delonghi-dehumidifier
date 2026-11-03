@@ -164,6 +164,30 @@
     },
     "real_feel_enter_write_failed": {
       "message": "Die Anfrage für Real Feel ist fehlgeschlagen; das Gerät könnte sie erhalten haben. Prüfe die De'Longhi-App, bevor du es erneut versuchst."
+    },
+    "credentials_rejected": {
+      "message": "De’Longhi hat die Zugangsdaten abgelehnt. Authentifiziere die Integration erneut."
+    },
+    "command_connection_failed": {
+      "message": "Die Cloud konnte den Befehl nicht bestätigen. Prüfe das Gerät in der De’Longhi-App, bevor du es erneut versuchst."
+    },
+    "command_failed": {
+      "message": "Der Befehl ist fehlgeschlagen. Prüfe das Gerät in der De’Longhi-App, bevor du es erneut versuchst."
+    },
+    "unsupported_mode": {
+      "message": "Dieser Entfeuchtungsmodus wird nicht unterstützt."
+    },
+    "cloud_permission_denied": {
+      "message": "Das De’Longhi-Konto ist für diese Anfrage nicht berechtigt (HTTP 403)."
+    },
+    "restart_required": {
+      "message": "Starte Home Assistant neu, bevor du diese Integration wieder verwendest."
+    },
+    "settings_changing": {
+      "message": "Die Integration wird geändert. Versuche es nach dem Neuladen erneut."
+    },
+    "ownership_recovery": {
+      "message": "Die Gerätezuordnung muss wiederhergestellt werden. Öffne die Reparaturen, um die Zuordnung zu prüfen."
     }
   },
   "common": {
