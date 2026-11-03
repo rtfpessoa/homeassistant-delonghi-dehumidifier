@@ -1,6 +1,6 @@
 # DeLonghi Dehumidifier (API)
 
-This custom component for Home Assistant adds support for DeLonghi dehumidifier appliances via API.
+Use Home Assistant to check room humidity, adjust the humidity target and control a supported De’Longhi dehumidifier through the De’Longhi cloud. An internet connection and a De’Longhi account with access to the appliance are required.
 
 [![Repository validation](https://github.com/rtfpessoa/homeassistant-delonghi-dehumidifier/actions/workflows/validate.yml/badge.svg)](https://github.com/rtfpessoa/homeassistant-delonghi-dehumidifier/actions/workflows/validate.yml)
 
@@ -53,6 +53,14 @@ hash when reporting an issue with a branch installation. See the
    privately verify which ID belongs to the intended appliance; cloud list
    order alone does not identify it. Do not continue if you cannot verify it.
 4. Add another integration entry to use another device with the same account.
+
+| Setup field | What to enter |
+| --- | --- |
+| De’Longhi account language | The language code used with the De’Longhi account, for example `en` (the default) or `de`. Home Assistant uses its own language for entity names. |
+| Email and password | The credentials you use to sign in to the De’Longhi app that lists the appliance. |
+| Device | Choose the identifier of the appliance you want this entry to control. The choices come from your signed-in account. |
+
+To change account settings on an existing entry, open **Settings > Devices & services**, find the integration and choose **Configure**. The form asks for the account language, email and password again. The new credentials must have access to the same appliance.
 
 Each entry remains bound to its selected device. Changing credentials or the
 account language requires that the same device is accessible to the new account.
@@ -110,6 +118,14 @@ separate recovery; do not silently overwrite history.
 If you also have the `delonghi_dehumidifier_wifi` integration, it has a separate
 Home Assistant entry. Adding this API integration does not automatically migrate
 the WiFi entities or automations that reference them.
+
+### Removing the integration
+
+1. Open **Settings > Devices & services** and select **DeLonghi Dehumidifier (API)**.
+2. Open the menu on the entry for the appliance you want to remove, then choose **Delete**. Check dashboards and automations that reference its entities. Each appliance has its own entry.
+3. To uninstall the component, delete its remaining entries, remove the download in HACS (or delete `custom_components/delonghi_dehumidifier_api` for a manual install), then restart Home Assistant.
+
+Deleting an entry removes its Home Assistant configuration. The appliance remains in your De’Longhi account. Keep the ownership journal with your backups. If you add the appliance again, follow the device selection and recovery steps above.
 
 ## Supported appliances
 
@@ -210,7 +226,52 @@ combined into one update. Cloud delays or a failed request can make values take
 longer to change. Changes made outside Home Assistant are checked during normal
 one-minute polling.
 
+## Automation examples
+
+Replace the example entity IDs with the ones on your appliance’s device page. Paste each example into the YAML editor for a separate automation.
+
+### Lower the humidity target when the room gets damp
+
+When the room humidity crosses 65%, set the target to 50% and turn on the dehumidifier. A shared account needs permission to control the appliance.
+
+```yaml
+alias: Dehumidify a damp room
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.basement_current_humidity
+    above: 65
+actions:
+  - action: humidifier.set_humidity
+    target:
+      entity_id: humidifier.basement
+    data:
+      humidity: 50
+  - action: humidifier.turn_on
+    target:
+      entity_id: humidifier.basement
+```
+
+### Show a notification when the appliance reports an alarm
+
+On a tested DDSX220, an active alarm has been observed when the tank is full or removed. Check the appliance to identify the cause.
+
+```yaml
+alias: Check the dehumidifier
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.basement_device_alarm
+    from: "off"
+    to: "on"
+actions:
+  - action: persistent_notification.create
+    data:
+      title: Dehumidifier alarm
+      message: Check the dehumidifier and its water tank.
+```
+
 ## Troubleshooting
+
+If setup finds no devices, check that the appliance appears under the same account in the De’Longhi app. If Home Assistant requests reauthentication, enter the current account password. For an unavailable device, first check that the appliance is online in the app and that Home Assistant can reach the internet. Follow any device ownership issue under **Settings > System > Repairs** before retrying control.
 
 To investigate tank alarms, switch synchronization or operating modes, download
 diagnostics from the integration's menu under **Settings > Devices & services**.
@@ -261,7 +322,13 @@ The integration's diagnostics contain a limited selection of data, but Home Assi
 
 [![Home Assistant Logs][ha-logs-badge]][ha-logs]
 
-### UI
+## Home Assistant quality scale
+
+Home Assistant displays **Custom** for integrations installed manually or through HACS. Platinum is a cumulative Core tier. Bronze covers setup and basic documentation, Silver adds reliability and testing, Gold adds features and a fuller user guide, and Platinum adds an asynchronous dependency, an injected HTTP session and strict typing. [Home Assistant quality scale](https://www.home-assistant.io/docs/quality_scale/) · [Rules by tier](https://contributors.home-assistant.io/core/quality-scale/rules/)
+
+This repository tracks readiness in its [rule checklist](custom_components/delonghi_dehumidifier_api/quality_scale.yaml). To receive an official tier, the integration would need a suitable, publicly maintained typed protocol library released on PyPI, a Core integration and documentation contribution, and approval by the Core team. The cloud authentication path currently lives in this component. A maintainer preparing the library needs to establish permission to use the vendor application credentials and endpoints, or obtain supported credentials. [Library requirements](https://contributors.home-assistant.io/core/integrations/api-library/) · [How tiers are reviewed](https://contributors.home-assistant.io/core/quality-scale/)
+
+## UI
 
 Following Lovelace cards work well with this integration:
 
