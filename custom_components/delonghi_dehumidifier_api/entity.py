@@ -102,7 +102,7 @@ class AuthAvailabilityEntity(Entity):
             await self._async_update(after_action=after_action)
         finally:
             self._action_updates -= 1
-            if self._action_refresh_generation is not None and not self._action_updates:
+            if not self._action_updates:
                 self._schedule_action_refresh()
 
     async def _async_update(self, *, after_action: bool) -> None:
@@ -115,7 +115,11 @@ class AuthAvailabilityEntity(Entity):
             self._schedule_action_refresh()
 
     def _schedule_action_refresh(self) -> None:
-        if self._action_refresh_removed or self._action_refresh_handle is not None:
+        if (
+            self._action_refresh_removed
+            or self._action_refresh_handle is not None
+            or self._action_refresh_generation is None
+        ):
             return
 
         def refresh() -> None:
