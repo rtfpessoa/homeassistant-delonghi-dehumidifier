@@ -63,4 +63,8 @@ jobs:
         if: matrix.typecheck
         run: python -m mypy
       - name: Run tests
-        run: python -m pytest -q
+        run: >-
+          python -m pytest -q --cov=custom_components.delonghi_dehumidifier_api
+          --cov-branch --cov-report=term-missing --cov-report=json:coverage.json
+      - name: Verify integration coverage
+        run: python scripts/check_coverage.py coverage.json
