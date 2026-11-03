@@ -17,6 +17,7 @@ from custom_components.delonghi_dehumidifier_api.const import DOMAIN
 from custom_components.delonghi_dehumidifier_api.humidifier import DehumidifierEntity
 from custom_components.delonghi_dehumidifier_api.sensor import GenericSensor
 from tests import test_switch_refresh
+from tests.diagnostic_helpers import enable_diagnostics
 
 device = test_switch_refresh.device
 
@@ -129,6 +130,8 @@ async def test_invalid_numeric_state_is_unavailable_and_recovers(
     """No boolean, fractional or malformed cloud value becomes a known state."""
     entry, properties, _, _, _, _, _, _ = device
     target = entity_id(hass, domain, suffix)
+    if field == "device_mode":
+        await enable_diagnostics(hass, entry, target)
     humidifier = entity_id(hass, "humidifier", "dehumidifier")
     entity = hass.data["humidifier"].get_entity(humidifier)
     before = (

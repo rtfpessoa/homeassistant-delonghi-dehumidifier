@@ -17,6 +17,7 @@ from custom_components.delonghi_dehumidifier_api.const import (
     DOMAIN,
     REAL_FEEL_ACTIVATION_PAYLOAD,
 )
+from tests.diagnostic_helpers import enable_diagnostics
 from tests.identity_helpers import bound_entry as MockConfigEntry
 
 # Keys are derived from the original English type_name, which also defines unique IDs.
@@ -46,6 +47,7 @@ class LegacySensor(sensor.GenericSensor):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._attr_entity_registry_enabled_default = True
         self._attr_translation_key = None
         self._attr_name = args[3]
 
@@ -168,6 +170,12 @@ async def test_new_sensor_and_switch_names(hass, cloud, language):
     registry = er.async_get(hass)
     entries = er.async_entries_for_config_entry(registry, entry.entry_id)
     assert len(entries) == 16
+    await enable_diagnostics(
+        hass,
+        entry,
+        registered(registry, "sensor", "current_speed_raw").entity_id,
+        registered(registry, "sensor", "device_mode").entity_id,
+    )
     translations = await async_get_translations(hass, language, "entity", [DOMAIN])
     assert_names(hass, registry, translations, language)
 
@@ -374,7 +382,11 @@ async def test_upgrade_preserves_all_entities_and_automation(hass, cloud, langua
     registry.async_update_entity(
         eco.entity_id, new_entity_id="switch.my_existing_eco", name="My eco"
     )
-    disabled = [("sensor", "filter_status"), ("switch", "swing_mode")]
+    disabled = [
+        ("sensor", "filter_status"),
+        ("switch", "swing_mode"),
+        ("sensor", "current_speed_raw"),
+    ]
     for domain, key in disabled:
         item = registered(registry, domain, key)
         registry.async_update_entity(
