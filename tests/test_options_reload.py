@@ -19,6 +19,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.delonghi_dehumidifier_api.client import (
     APIClient,
+    CloudPermissionDeniedError,
     InvalidCredentialsError,
     NoDevicesError,
     TransientCloudError,
@@ -204,6 +205,7 @@ async def test_existing_account_form_uses_current_settings(hass, mock_client, ki
     [
         ("authenticate", InvalidCredentialsError(), "invalid_auth"),
         ("get_devices", TransientCloudError(), "cannot_connect"),
+        ("get_devices", CloudPermissionDeniedError(), "permission_denied"),
         ("get_devices", NoDevicesError(), "no_devices"),
         ("get_devices", ["another-dsn"], "device_not_available"),
         ("get_devices", ValueError("private response"), "unknown"),
@@ -228,6 +230,10 @@ async def test_account_settings_recovery(
     assert entity_ids
     manager, form = await open_account_form(hass, entry, kind)
     assert form["type"] == "form"
+    category = "options" if kind == "options" else "config"
+    for locale in ("en", "de"):
+        messages = await async_get_translations(hass, locale, category, [DOMAIN])
+        assert messages[f"component.{DOMAIN}.{category}.error.{error}"]
     rejected = (
         AsyncMock(side_effect=failure)
         if isinstance(failure, Exception)

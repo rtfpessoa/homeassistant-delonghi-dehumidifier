@@ -43,7 +43,8 @@
       "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut.",
       "no_devices": "In diesem De'Longhi-Konto wurden keine Geräte gefunden. Füge zuerst ein Gerät in der De'Longhi-App hinzu.",
       "device_not_available": "Das ausgewählte Gerät ist in diesem Konto nicht verfügbar.",
-      "ownership_unavailable": "Gerätezuordnungen konnten nicht gelesen oder gespeichert werden. Stelle eine vollständige Home-Assistant-Sicherung wieder her."
+      "ownership_unavailable": "Gerätezuordnungen konnten nicht gelesen oder gespeichert werden. Stelle eine vollständige Home-Assistant-Sicherung wieder her.",
+      "permission_denied": "De’Longhi hat den Zugriff verweigert. Prüfe die Gerätefreigabe und die Kontoberechtigungen in der De’Longhi-App, bevor du es erneut versuchst."
     },
     "abort": {
       "already_configured": "Dieses Gerät ist bereits eingerichtet.",
@@ -76,7 +77,8 @@
       "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut.",
       "no_devices": "In diesem De'Longhi-Konto wurden keine Geräte gefunden. Füge zuerst ein Gerät in der De'Longhi-App hinzu.",
       "cannot_connect": "Die Verbindung zu De'Longhi konnte nicht hergestellt werden. Bitte versuche es erneut.",
-      "device_not_available": "Das ausgewählte Gerät ist in diesem Konto nicht verfügbar."
+      "device_not_available": "Das ausgewählte Gerät ist in diesem Konto nicht verfügbar.",
+      "permission_denied": "De’Longhi hat den Zugriff verweigert. Prüfe die Gerätefreigabe und die Kontoberechtigungen in der De’Longhi-App, bevor du es erneut versuchst."
     },
     "abort": {
       "reauth_settings_changed": "Die Integrationseinstellungen wurden geändert. Bitte starte die Optionen erneut.",
@@ -266,7 +268,8 @@
           "no_devices": "Keine zugeordneten Geräte gefunden.",
           "device_not_available": "Das ausgewählte Gerät ist in diesem Konto nicht verfügbar.",
           "unknown": "Ein unerwarteter Fehler ist aufgetreten.",
-          "ownership_unavailable": "Gerätezuordnungen konnten nicht gelesen oder gespeichert werden. Stelle eine vollständige Home-Assistant-Sicherung wieder her."
+          "ownership_unavailable": "Gerätezuordnungen konnten nicht gelesen oder gespeichert werden. Stelle eine vollständige Home-Assistant-Sicherung wieder her.",
+          "permission_denied": "De’Longhi hat den Zugriff verweigert. Prüfe die Gerätefreigabe und die Kontoberechtigungen in der De’Longhi-App, bevor du es erneut versuchst."
         },
         "abort": {
           "entry_removed": "Der Eintrag wurde entfernt.",

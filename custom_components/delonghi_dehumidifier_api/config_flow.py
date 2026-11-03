@@ -25,6 +25,7 @@ from homeassistant.helpers import issue_registry as ir
 from . import DeLonghiDehumidifierConfigEntry, _async_update_options
 from .client import (
     APIClient,
+    CloudPermissionDeniedError,
     DeviceNotAvailableError,
     InvalidCredentialsError,
     NoDevicesError,
@@ -79,6 +80,8 @@ async def _validate_device_settings(
         return await client.get_product_name(), None
     except InvalidCredentialsError:
         return "", "invalid_auth"
+    except CloudPermissionDeniedError:
+        return "", "permission_denied"
     except (aiohttp.ClientError, TimeoutError, TransientCloudError):
         return "", "cannot_connect"
     except NoDevicesError:
@@ -143,6 +146,8 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     await client.verify_device(dsn)
             except InvalidCredentialsError:
                 errors["base"] = "invalid_auth"
+            except CloudPermissionDeniedError:
+                errors["base"] = "permission_denied"
             except (aiohttp.ClientError, TimeoutError, TransientCloudError):
                 errors["base"] = "cannot_connect"
             except (NoDevicesError, DeviceNotAvailableError):
@@ -220,6 +225,8 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 devices = await client.get_devices()
             except InvalidCredentialsError:
                 errors["base"] = "invalid_auth"
+            except CloudPermissionDeniedError:
+                errors["base"] = "permission_denied"
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
             except (aiohttp.ClientError, TimeoutError, TransientCloudError):

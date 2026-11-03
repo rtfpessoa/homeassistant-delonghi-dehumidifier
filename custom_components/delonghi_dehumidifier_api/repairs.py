@@ -15,6 +15,7 @@ from homeassistant.helpers.selector import TextSelector, TextSelectorType
 
 from .client import (
     APIClient,
+    CloudPermissionDeniedError,
     DeviceNotAvailableError,
     InvalidCredentialsError,
     NoDevicesError,
@@ -144,6 +145,8 @@ class BindingRepair(RepairsFlow):
                 return self._show_init(entry)
         except InvalidCredentialsError:
             error = "invalid_auth"
+        except CloudPermissionDeniedError:
+            error = "permission_denied"
         except (aiohttp.ClientError, TimeoutError, TransientCloudError):
             error = "cannot_connect"
         except NoDevicesError:
@@ -285,6 +288,8 @@ class BindingRepair(RepairsFlow):
                 await client.verify_device(self._dsn)
         except InvalidCredentialsError:
             error = "invalid_auth"
+        except CloudPermissionDeniedError:
+            error = "permission_denied"
         except (aiohttp.ClientError, TimeoutError, TransientCloudError):
             error = "cannot_connect"
         except (NoDevicesError, DeviceNotAvailableError):
