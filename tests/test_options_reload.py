@@ -11,6 +11,7 @@ from homeassistant.config_entries import SOURCE_RECONFIGURE
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
 from homeassistant.data_entry_flow import UnknownFlow
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.translation import async_get_translations
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry as LegacyConfigEntry,
@@ -25,6 +26,7 @@ from custom_components.delonghi_dehumidifier_api.client import (
 from custom_components.delonghi_dehumidifier_api.const import DOMAIN
 from custom_components.delonghi_dehumidifier_api.identity import (
     CONF_DSN,
+    ISSUE_PREFIX,
     require_restart,
 )
 from tests.identity_helpers import bound_entry as MockConfigEntry
@@ -270,8 +272,19 @@ def assert_account_identity(hass, entry, unique_id, dsn, entity_ids):
 
 
 @pytest.mark.parametrize("kind", ["reconfigure", "options"])
-@pytest.mark.parametrize("interrupt", ["change", "cancel", "restart"])
-async def test_stale_account_edit_cannot_apply(hass, mock_client, kind, interrupt):
+@pytest.mark.parametrize(
+    ("interrupt", "corrupt_journal"),
+    [
+        ("change", False),
+        ("cancel", False),
+        ("restart", False),
+        ("change", True),
+        ("restart", True),
+    ],
+)
+async def test_stale_account_edit_cannot_apply(
+    hass, mock_client, kind, interrupt, corrupt_journal
+):
     entry = MockConfigEntry(domain=DOMAIN, data=ORIGINAL)
     entry.add_to_hass(hass)
     manager, form = await open_account_form(hass, entry, kind)
@@ -296,6 +309,10 @@ async def test_stale_account_edit_cannot_apply(hass, mock_client, kind, interrup
             manager.async_abort(form["flow_id"])
         else:
             require_restart(hass, entry.entry_id, entry.data[CONF_DSN])
+        if corrupt_journal:
+            Path(hass.config.path(".storage", f"{DOMAIN}.claims")).write_text(
+                "invalid json"
+            )
         resume.set()
         try:
             result = await pending
@@ -309,6 +326,10 @@ async def test_stale_account_edit_cannot_apply(hass, mock_client, kind, interrup
         reload_entry.assert_not_called()
     assert entry.data == original_data
     assert entry.options == ({"newer": True} if interrupt == "change" else {})
+    assert (
+        ir.async_get(hass).async_get_issue(DOMAIN, f"{ISSUE_PREFIX}{entry.entry_id}")
+        is None
+    )
 
 
 @pytest.mark.parametrize("kind", ["reconfigure", "options"])
@@ -347,6 +368,14 @@ async def test_edit_rejects_lost_ownership(hass, mock_client, kind, stored, load
     assert result["type"] == "abort" and result["reason"] == "device_binding_required"
     APIClient.authenticate.assert_not_awaited()
     assert entry.data == {**ORIGINAL, CONF_DSN: "test-dsn"}
+    issue = ir.async_get(hass).async_get_issue(
+        DOMAIN, f"{ISSUE_PREFIX}{entry.entry_id}"
+    )
+    assert (
+        issue is not None
+        and issue.is_fixable
+        and issue.data == {"entry_id": entry.entry_id}
+    )
     if loaded:
         assert await hass.config_entries.async_unload(entry.entry_id)
 
