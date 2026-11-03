@@ -14,6 +14,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.delonghi_dehumidifier_api import config_flow, identity
 from custom_components.delonghi_dehumidifier_api.client import (
     APIClient,
+    CloudPermissionDeniedError,
     DeviceNotAvailableError,
     InvalidCredentialsError,
     NoDevicesError,
@@ -60,6 +61,7 @@ def assert_created(result):
         ("authenticate", False, "invalid_auth"),
         ("authenticate", InvalidCredentialsError(), "invalid_auth"),
         ("get_devices", TransientCloudError(), "cannot_connect"),
+        ("get_devices", CloudPermissionDeniedError(), "permission_denied"),
         ("get_devices", NoDevicesError(), "no_devices"),
         ("get_devices", RuntimeError(), "unknown"),
     ],
@@ -98,16 +100,19 @@ async def test_selected_device_returns_to_account(hass, account_cloud):
 
 
 @pytest.mark.parametrize(
-    ("failure", "error"),
+    ("method", "failure", "error"),
     [
-        (False, "unknown"),
-        (InvalidCredentialsError(), "invalid_auth"),
-        (TimeoutError(), "cannot_connect"),
-        (DeviceNotAvailableError(), "device_not_available"),
-        (ValueError(), "unknown"),
+        ("authenticate", False, "unknown"),
+        ("authenticate", InvalidCredentialsError(), "invalid_auth"),
+        ("authenticate", TimeoutError(), "cannot_connect"),
+        ("get_devices", CloudPermissionDeniedError(), "permission_denied"),
+        ("authenticate", DeviceNotAvailableError(), "device_not_available"),
+        ("authenticate", ValueError(), "unknown"),
     ],
 )
-async def test_reauth_error_can_finish_same_flow(hass, account_cloud, failure, error):
+async def test_reauth_error_can_finish_same_flow(
+    hass, account_cloud, method, failure, error
+):
     entry = bound_entry(domain=DOMAIN, data=ACCOUNT)
     entry.add_to_hass(hass)
     unique_id = entry.unique_id
@@ -123,9 +128,10 @@ async def test_reauth_error_can_finish_same_flow(hass, account_cloud, failure, e
         else AsyncMock(return_value=failure)
     )
     input_data = {"password": "replacement"}
-    with patch.object(APIClient, "authenticate", mock_auth):
+    with patch.object(APIClient, method, mock_auth):
         form = await manager.async_configure(form["flow_id"], input_data)
     assert form["errors"] == {"base": error}
+    assert entry.data["password"] == ACCOUNT["password"]
     result = await manager.async_configure(form["flow_id"], input_data)
     assert result["type"] == "abort" and result["reason"] == "reauth_successful"
     assert hass.config_entries.async_entries(DOMAIN) == [entry]

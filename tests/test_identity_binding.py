@@ -12,6 +12,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.delonghi_dehumidifier_api.client import (
     APIClient,
+    CloudPermissionDeniedError,
     DeviceNotSelectedError,
     InvalidDeviceListError,
     NoDevicesError,
@@ -430,6 +431,7 @@ async def test_repairs_translations_resolve_in_both_languages(hass):
         assert translated[f"{prefix}.fix_flow.step.owner.data.owner"]
         assert translated[f"{prefix}.fix_flow.step.confirm.description"]
         assert translated[f"{prefix}.fix_flow.error.device_not_available"]
+        assert translated[f"{prefix}.fix_flow.error.permission_denied"]
 
 
 async def test_repair_new_credentials_save_only_after_membership_verification(hass):
@@ -1094,3 +1096,44 @@ async def test_removed_owner_does_not_promote_loser_without_explicit_reelection(
         assert second.data[CONF_DSN] == "a"
         assert dr.async_entries_for_config_entry(registry, second.entry_id)
         await second.runtime_data.async_shutdown()
+
+
+async def test_repair_permission_errors_can_recover_without_rebinding(hass):
+    from homeassistant.components.repairs import repairs_flow_manager
+    from homeassistant.setup import async_setup_component
+
+    entry = MockConfigEntry(domain=DOMAIN, data=DATA, version=1)
+    entry.add_to_hass(hass)
+    await assert_legacy_binding_pending(hass, entry)
+    assert await async_setup_component(hass, "repairs", {})
+    manager = repairs_flow_manager(hass)
+    with (
+        patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
+        patch.object(APIClient, "get_devices", AsyncMock(return_value=["a"])),
+        patch.object(hass.config_entries, "async_forward_entry_setups", AsyncMock()),
+    ):
+        denied = AsyncMock(side_effect=CloudPermissionDeniedError())
+        with patch.object(APIClient, "get_devices", denied):
+            form = await manager.async_init(
+                DOMAIN, data={"issue_id": f"device_binding_{entry.entry_id}"}
+            )
+        assert form["step_id"] == "discover" and form["errors"] == {
+            "base": "permission_denied"
+        }
+        assert_legacy_entry_unchanged(entry)
+        form = await manager.async_configure(form["flow_id"], {})
+        form = await manager.async_configure(form["flow_id"], {CONF_DSN: "a"})
+        form = await manager.async_configure(form["flow_id"], {"owner": entry.entry_id})
+        with patch.object(APIClient, "get_devices", denied):
+            form = await manager.async_configure(form["flow_id"], {})
+        assert form["step_id"] == "confirm" and form["errors"] == {
+            "base": "permission_denied"
+        }
+        assert_legacy_entry_unchanged(entry)
+        assert denied.await_count == 2
+        assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+        result = await manager.async_configure(form["flow_id"], {})
+        assert result["type"] == "create_entry"
+        await hass.async_block_till_done()
+        assert_pinned_identity(entry, "a")
+        assert await hass.config_entries.async_unload(entry.entry_id)

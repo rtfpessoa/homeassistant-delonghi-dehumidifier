@@ -43,7 +43,8 @@
       "unknown": "An unexpected error occurred. Please try again.",
       "no_devices": "No devices were found in this De'Longhi account. Add a device in the De'Longhi app first.",
       "device_not_available": "The selected device is not available on this account.",
-      "ownership_unavailable": "Device ownership could not be read or saved. Restore a full Home Assistant backup."
+      "ownership_unavailable": "Device ownership could not be read or saved. Restore a full Home Assistant backup.",
+      "permission_denied": "De’Longhi denied access. Check appliance sharing and account permissions in the De’Longhi app before trying again."
     },
     "abort": {
       "already_configured": "This device is already configured.",
@@ -76,7 +77,8 @@
       "unknown": "An unexpected error occurred. Please try again.",
       "no_devices": "No devices were found in this De'Longhi account. Add a device in the De'Longhi app first.",
       "cannot_connect": "Could not connect to De'Longhi. Please try again.",
-      "device_not_available": "The selected device is not available on this account."
+      "device_not_available": "The selected device is not available on this account.",
+      "permission_denied": "De’Longhi denied access. Check appliance sharing and account permissions in the De’Longhi app before trying again."
     },
     "abort": {
       "reauth_settings_changed": "The integration settings changed. Please open the options again.",
@@ -266,7 +268,8 @@
           "no_devices": "No associated devices were found.",
           "device_not_available": "The selected device is not available on this account.",
           "unknown": "An unexpected error occurred.",
-          "ownership_unavailable": "Device ownership could not be read or saved. Restore a full Home Assistant backup."
+          "ownership_unavailable": "Device ownership could not be read or saved. Restore a full Home Assistant backup.",
+          "permission_denied": "De’Longhi denied access. Check appliance sharing and account permissions in the De’Longhi app before trying again."
         },
         "abort": {
           "entry_removed": "The entry was removed.",
