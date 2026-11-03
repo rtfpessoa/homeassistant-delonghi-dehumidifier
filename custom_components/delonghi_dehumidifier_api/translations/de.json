@@ -188,6 +188,36 @@
     },
     "ownership_recovery": {
       "message": "Die Gerätezuordnung muss wiederhergestellt werden. Öffne die Reparaturen, um die Zuordnung zu prüfen."
+    },
+    "setup_settings_changed": {
+      "message": "Die Integrationseinstellungen wurden während der Einrichtung geändert. Home Assistant versucht es erneut."
+    },
+    "binding_recovery": {
+      "message": "Die gespeicherte Gerätezuordnung konnte nicht bestätigt werden. Öffne die Reparaturen, um die Zuordnung zu prüfen."
+    },
+    "entry_disabled": {
+      "message": "Dieser Integrationseintrag ist deaktiviert oder nicht mehr vorhanden."
+    },
+    "binding_confirmation": {
+      "message": "Öffne die Reparaturen, um zu bestätigen, welches Gerät zu diesem Eintrag gehört."
+    },
+    "authentication_incomplete": {
+      "message": "Die Anmeldung bei der De’Longhi-Cloud wurde nicht abgeschlossen. Home Assistant versucht es erneut."
+    },
+    "device_not_available": {
+      "message": "Das gewählte Gerät ist mit diesem Konto nicht erreichbar. Prüfe den Zugriff in der De’Longhi-App und öffne die Reparaturen."
+    },
+    "no_devices": {
+      "message": "Das De’Longhi-Konto hat keine Geräte gemeldet. Prüfe das Konto in der De’Longhi-App."
+    },
+    "cloud_unavailable": {
+      "message": "Die De’Longhi-Cloud ist nicht erreichbar. Home Assistant versucht es erneut."
+    },
+    "invalid_device_list": {
+      "message": "Die De’Longhi-Cloud hat eine ungültige Geräteliste zurückgegeben. Home Assistant versucht es erneut."
+    },
+    "invalid_cloud_response": {
+      "message": "Die De’Longhi-Cloud hat unerwartet geantwortet. Prüfe den Zugriff in der App und lade die Integration neu."
     }
   },
   "common": {
