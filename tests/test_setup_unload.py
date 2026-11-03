@@ -72,7 +72,7 @@ async def test_setup_and_unload_device(hass):
             hass, entry, mode_entity_id, "sensor.test_dehumidifier_current_speed_raw"
         )
         expected_states = {
-            "humidifier.test_dehumidifier_unit": "on",
+            "humidifier.test_dehumidifier": "on",
             "sensor.test_dehumidifier_current_humidity": "54",
             "switch.test_dehumidifier_eco_mode": "on",
             "switch.test_dehumidifier_swing_mode": "off",

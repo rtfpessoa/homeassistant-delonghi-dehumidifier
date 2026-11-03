@@ -100,15 +100,15 @@ def entity(registry, domain, unique_id):
 
 
 @pytest.mark.parametrize(
-    ("language", "unit_name", "alarm_name"),
+    ("language", "alarm_name"),
     [
-        ("en", "Unit", "Device alarm"),
-        ("de", "Gerät", "Gerätealarm"),
-        ("fr", "Unit", "Device alarm"),
+        ("en", "Device alarm"),
+        ("de", "Gerätealarm"),
+        ("fr", "Device alarm"),
     ],
 )
 async def test_new_entities_use_server_language_and_keep_states(
-    hass, cloud, language, unit_name, alarm_name
+    hass, cloud, language, alarm_name
 ):
     """Fresh setup loads names in the server language with English fallback."""
     hass.config.language = language
@@ -118,20 +118,53 @@ async def test_new_entities_use_server_language_and_keep_states(
     registry = er.async_get(hass)
     unit = entity(registry, "humidifier", UNIT_UNIQUE_ID)
     alarm = entity(registry, "binary_sensor", ALARM_UNIQUE_ID)
-    assert unit.original_name == unit_name
+    assert unit.original_name is None
     assert alarm.original_name == alarm_name
-    assert unit.translation_key == "unit"
+    assert unit.translation_key is None
     assert alarm.translation_key == "device_alarm"
     assert hass.states.get(unit.entity_id).attributes["friendly_name"] == (
-        f"Test Dehumidifier {unit_name}"
+        "Test Dehumidifier"
     )
     assert hass.states.get(alarm.entity_id).attributes["friendly_name"] == (
         f"Test Dehumidifier {alarm_name}"
     )
     localized = await async_get_translations(hass, language, "entity", [DOMAIN])
-    assert localized[f"component.{DOMAIN}.entity.humidifier.unit.name"] == unit_name
     assert localized[f"component.{DOMAIN}.entity.binary_sensor.device_alarm.name"] == (
         alarm_name
+    )
+
+
+@pytest.mark.parametrize(
+    ("language", "old_name", "old_object_id"),
+    [
+        ("en", "Unit", "test_dehumidifier_unit"),
+        ("de", "Gerät", "test_dehumidifier_gerat"),
+    ],
+)
+async def test_existing_default_entity_id_survives_name_change(
+    hass, cloud, language, old_name, old_object_id
+):
+    """Keep the registry record used by dashboards, history and automations."""
+    hass.config.language = language
+    entry, _ = cloud
+    registry = er.async_get(hass)
+    previous = registry.async_get_or_create(
+        "humidifier",
+        DOMAIN,
+        UNIT_UNIQUE_ID,
+        config_entry=entry,
+        suggested_object_id=old_object_id,
+        original_name=old_name,
+        translation_key="unit",
+    )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    unit = entity(registry, "humidifier", UNIT_UNIQUE_ID)
+    assert (unit.id, unit.entity_id) == (previous.id, f"humidifier.{old_object_id}")
+    assert unit.original_name is None and unit.translation_key is None
+    assert (
+        hass.states.get(unit.entity_id).attributes["friendly_name"]
+        == "Test Dehumidifier"
     )
 
 
@@ -166,10 +199,10 @@ def assert_legacy_names(unit, alarm):
     assert unit.translation_key is None and alarm.translation_key is None
 
 
-def assert_custom_unit(hass, unit, area, language):
+def assert_custom_unit(hass, unit, area):
     """Check the localized default and every user-owned humidifier setting."""
-    assert unit.translation_key == "unit"
-    assert unit.original_name == ("Gerät" if language == "de" else "Unit")
+    assert unit.translation_key is None
+    assert unit.original_name is None
     assert unit.name == "My custom humidifier"
     assert unit.icon == "mdi:star"
     assert unit.area_id == area.id
@@ -272,7 +305,7 @@ async def test_upgrade_preserves_registry_and_existing_automation(
     assert after == before
     updated_unit = entity(registry, "humidifier", UNIT_UNIQUE_ID)
     updated_alarm = entity(registry, "binary_sensor", ALARM_UNIQUE_ID)
-    assert_custom_unit(hass, updated_unit, area, language)
+    assert_custom_unit(hass, updated_unit, area)
     assert_disabled_alarm(hass, updated_alarm)
 
     registry.async_update_entity(updated_alarm.entity_id, disabled_by=None)

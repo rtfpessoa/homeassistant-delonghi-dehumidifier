@@ -208,11 +208,12 @@ for cloud data. Other models and firmware versions do not advertise Real Feel in
 the selector. The existing direct `REAL_FEEL` action remains available;
 its behavior on other devices and firmware versions has not been established.
 
-The default names of the integration's entities follow Home Assistant's
-system language. Their `friendly_name` state attributes can therefore change,
-so templates that compare those names may need updating. Home Assistant may use
-the system language to generate entity IDs on a new installation. Other existing
-entity IDs and user-assigned names are retained when updating the integration.
+The main dehumidifier control takes the device name. On upgrade its default
+friendly name loses the former “Unit” suffix (“Gerät” in German). Existing
+entity IDs, user-assigned names and automations targeting those IDs are preserved.
+Templates that compare `friendly_name` may need updating. On new installations,
+Home Assistant generates the main entity ID from the device name. The other
+entities use names in Home Assistant’s system language.
 
 For a DDSX220, the device alarm uses the API's `alarm_state`: integer `0` is
 off, integer `3` is on, and other or missing values are unknown. This mapping
