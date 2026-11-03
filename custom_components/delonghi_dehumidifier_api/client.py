@@ -1384,8 +1384,8 @@ class APIClient:
         return next(
             (
                 prop.get("value")
-                for prop in property_records(device_properties)
-                if prop.get("name") == name
+                for prop in device_properties
+                if isinstance(prop, dict) and prop.get("name") == name
             ),
             None,
         )

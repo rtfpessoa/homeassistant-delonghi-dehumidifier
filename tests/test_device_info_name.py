@@ -1,4 +1,4 @@
-"""Device registry naming tests."""
+"""Device registry metadata tests."""
 
 from unittest.mock import AsyncMock
 
@@ -32,3 +32,18 @@ async def test_device_info_name_with_missing_or_present_product_name(
     assert device_info["name"] == expected
     assert device_info["identifiers"] == {(DOMAIN, "device-123")}
     assert device_info["model"] == "DDSX220"
+
+
+@pytest.mark.parametrize("null_index", [0, 1])
+async def test_device_info_reads_valid_metadata_among_null_properties(null_index):
+    client = APIClient(None, "en", "user@example.com", "password")
+    client.device_dsn = "device-123"
+    records = [{"property": {"name": "appliance_model", "value": "DDSX220"}}]
+    records.insert(null_index, {"property": None})
+    client.get_request = AsyncMock(return_value=records)
+
+    device_info = await fetch_device_info(client)
+
+    assert device_info["model"] == "DDSX220"
+    assert device_info["identifiers"] == {(DOMAIN, "device-123")}
+    assert await client.get_property("absent_property") is None
