@@ -6,6 +6,7 @@ from homeassistant.exceptions import HomeAssistantError
 from custom_components.delonghi_dehumidifier_api.const import (
     REAL_FEEL_DEACTIVATION_PAYLOAD,
 )
+from custom_components.delonghi_dehumidifier_api.real_feel import supports_real_feel
 from tests.test_client_http import make_client
 
 
@@ -24,3 +25,11 @@ async def test_transport_sends_one_post_and_does_not_follow_redirects(status):
     assert url.endswith("/properties/activate_realfeel/datapoints.json")
     assert kwargs["allow_redirects"] is False
     assert kwargs["json"] == {"datapoint": {"value": REAL_FEEL_DEACTIVATION_PAYLOAD}}
+
+
+@pytest.mark.parametrize(
+    "properties",
+    [None, {}, [None], [{"name": "appliance_model", "value": "DDSX220"}, 7]],
+)
+def test_malformed_snapshot_cannot_enable_firmware_specific_commands(properties):
+    assert not supports_real_feel(properties)
