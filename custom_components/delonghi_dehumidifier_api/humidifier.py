@@ -33,6 +33,8 @@ from .utils import fetch_device_info
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=1)
+# The client coalesces reads and serializes humidifier commands.
+PARALLEL_UPDATES = 0
 _PENDING_SECONDS = 120
 _PENDING_REFRESH_INTERVAL = 15
 _PENDING_REFRESH_LIMIT = 4

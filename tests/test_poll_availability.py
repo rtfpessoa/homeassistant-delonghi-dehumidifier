@@ -50,14 +50,13 @@ async def test_poll_outage_and_recovery(hass, device, caplog, error):
     assert hass.states.get(humidifier).state == "on"
     assert hass.states.get(humidity).state == "54"
     get.side_effect = error
-    with caplog.at_level(logging.WARNING):
-        await update(hass, entry, humidifier, humidity)
-        assert hass.states.get(humidifier).state == STATE_UNAVAILABLE
-        assert hass.states.get(humidity).state == STATE_UNAVAILABLE
-        warnings = len(caplog.records)
-        await update(hass, entry, humidifier, humidity)
-        assert len(caplog.records) == warnings
-    assert "secret-" not in caplog.text
+    alarm = entity_id(hass, "binary_sensor", "device_alarm_binary_sensor")
+    eco = entity_id(hass, "switch", "eco_mode_switch")
+    caplog.set_level(logging.INFO, logger=f"custom_components.{DOMAIN}")
+    await update(hass, entry, humidifier, humidity, alarm, eco)
+    for identifier in (humidifier, humidity, alarm, eco):
+        assert hass.states.get(identifier).state == STATE_UNAVAILABLE
+    await update(hass, entry, humidifier, humidity, alarm, eco)
 
     properties.update(current_humidity=49, device_status=2)
     get.side_effect = lambda _path: snapshot()
@@ -65,6 +64,17 @@ async def test_poll_outage_and_recovery(hass, device, caplog, error):
     assert hass.states.get(humidifier).state == "off"
     assert hass.states.get(humidifier).attributes["current_humidity"] == 49
     assert hass.states.get(humidity).state == "49"
+    await update(hass, entry, humidity)
+    records = [
+        (r.levelname, r.getMessage())
+        for r in caplog.records
+        if r.name.startswith(f"custom_components.{DOMAIN}")
+    ]
+    assert records == [
+        ("INFO", "DeLonghi cloud device data is unavailable"),
+        ("INFO", "DeLonghi cloud device data is available again"),
+    ]
+    assert "secret-" not in caplog.text
 
 
 async def test_missing_values_are_unknown_and_recover(hass, device):
@@ -98,6 +108,7 @@ async def test_partial_bad_snapshot_does_not_mutate_humidifier(hass, device, cap
         entity.current_humidity,
         entity.is_on,
     ) == old
+    assert "InvalidNumericStateError" in caplog.text
     assert "secret-bad-number" not in caplog.text
     properties.update(humidity_setpoint=45, current_humidity=43, device_status=2)
     await update(hass, entry, humidifier)

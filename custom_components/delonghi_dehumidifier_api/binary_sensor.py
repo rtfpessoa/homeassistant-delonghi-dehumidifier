@@ -20,6 +20,8 @@ from .entity import AuthAvailabilityEntity
 from .utils import fetch_device_info
 
 SCAN_INTERVAL = timedelta(minutes=1)
+# The device alarm reads the same shared snapshot as the sensors.
+PARALLEL_UPDATES = 0
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -57,11 +59,7 @@ class DeviceAlarm(AuthAvailabilityEntity, BinarySensorEntity):
             properties = await self.client.get_properties()
         except Exception as err:  # noqa: BLE001
             # Any fetch failure must not leave a stale alarm state visible.
-            if self._attr_available:
-                _LOGGER.warning(
-                    "Unable to update device alarm (%s)", type(err).__name__
-                )
-            self._attr_available = False
+            self._mark_poll_unavailable(err, _LOGGER)
             return
 
         self._attr_available = True

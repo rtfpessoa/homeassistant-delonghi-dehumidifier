@@ -5,7 +5,7 @@ import logging
 
 from homeassistant.helpers.entity import Entity
 
-from .client import APIClient, InvalidCredentialsError
+from .client import APIClient, InvalidCredentialsError, is_poll_connection_error
 
 
 class AuthAvailabilityEntity(Entity):
@@ -85,7 +85,15 @@ class AuthAvailabilityEntity(Entity):
         """Mark a failed poll unavailable unless a newer poll has completed."""
         if not self._accept_poll(generation):
             return
-        if self.available and not isinstance(err, InvalidCredentialsError):
+        self._mark_poll_unavailable(err, logger)
+
+    def _mark_poll_unavailable(self, err: Exception, logger: logging.Logger) -> None:
+        """Preserve local value diagnostics; the shared read logs cloud outages."""
+        if (
+            self.available
+            and not isinstance(err, InvalidCredentialsError)
+            and not is_poll_connection_error(err)
+        ):
             logger.warning("Unable to update entity (%s)", type(err).__name__)
         self._attr_available = False
 

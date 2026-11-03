@@ -379,9 +379,7 @@ async def test_entity_debug_logs_hide_identifiers_values_and_errors(hass, caplog
     assert "Updated humidifier" in messages
     assert "Turning on switch" in messages
     assert "Using existing access token" in messages
-    assert "Unable to update switch" in messages
-    assert "Unable to update device alarm" in messages
-    assert "Unable to update entity" in messages
+    assert messages.count("DeLonghi cloud device data is unavailable") == 1
 
 
 @pytest.mark.parametrize(
