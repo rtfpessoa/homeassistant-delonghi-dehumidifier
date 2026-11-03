@@ -2,7 +2,7 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from homeassistant import config_entries, data_entry_flow
@@ -18,16 +18,26 @@ CONFIG = {
 }
 
 
+class Response(SimpleNamespace):
+    """Return this synthetic response for the lifetime of a session request."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        """No real connection needs releasing."""
+
+
 def login_error_session(error_code):
     """Return a synthetic session reaching the real provider login code."""
     return SimpleNamespace(
-        get=AsyncMock(
+        get=Mock(
             side_effect=[
-                SimpleNamespace(
+                Response(
                     status=302,
                     headers={"Location": "https://example.invalid/?context=test"},
                 ),
-                SimpleNamespace(
+                Response(
                     status=200,
                     text=AsyncMock(
                         return_value=json.dumps(
@@ -37,8 +47,8 @@ def login_error_session(error_code):
                 ),
             ]
         ),
-        post=AsyncMock(
-            return_value=SimpleNamespace(
+        post=Mock(
+            return_value=Response(
                 status=200,
                 text=AsyncMock(
                     return_value=json.dumps(
@@ -73,7 +83,7 @@ async def test_user_flow_classifies_login_errors(hass, error_code, expected):
 
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["errors"]["base"] == expected
-    assert session.post.await_count == 1
+    assert session.post.call_count == 1
 
 
 async def test_options_flow_reports_invalid_credentials(hass):
@@ -102,21 +112,19 @@ async def test_options_flow_reports_invalid_credentials(hass):
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["errors"]["base"] == "invalid_auth"
     assert entry.options == {}
-    assert session.post.await_count == 1
+    assert session.post.call_count == 1
 
 
 async def test_successful_authentication_passes_login_token_to_provider():
     """A successful provider login continues through the full token exchange."""
 
     def json_response(data):
-        return SimpleNamespace(
-            status=200, text=AsyncMock(return_value=json.dumps(data))
-        )
+        return Response(status=200, text=AsyncMock(return_value=json.dumps(data)))
 
     session = SimpleNamespace(
-        get=AsyncMock(
+        get=Mock(
             side_effect=[
-                SimpleNamespace(
+                Response(
                     status=302,
                     headers={
                         "Location": "https://example.invalid/?context=test-context"
@@ -125,17 +133,17 @@ async def test_successful_authentication_passes_login_token_to_provider():
                 json_response(
                     {"ucid": "test-ucid", "gmid": "test-gmid", "gmidTicket": "ticket"}
                 ),
-                SimpleNamespace(
+                Response(
                     status=200,
                     text=AsyncMock(return_value="const consentObj2Sig = 'signature';"),
                 ),
-                SimpleNamespace(
+                Response(
                     status=302,
                     headers={"Location": "https://example.invalid/?code=test-code"},
                 ),
             ]
         ),
-        post=AsyncMock(
+        post=Mock(
             side_effect=[
                 json_response(
                     {"errorCode": 0, "sessionInfo": {"login_token": "login-token"}}
@@ -163,10 +171,10 @@ async def test_successful_authentication_passes_login_token_to_provider():
     assert await client.authenticate() is True
     assert client.access_token == "access-token"
     assert client.refresh_token == "refresh-token"
-    user_info = session.post.await_args_list[1]
+    user_info = session.post.call_args_list[1]
     assert user_info.args[0] == "https://socialize.eu1.gigya.com/socialize.getUserInfo"
     assert user_info.kwargs["data"]["login_token"] == "login-token"
     assert (
-        session.get.await_args_list[3].kwargs["params"]["login_token"] == "login-token"
+        session.get.call_args_list[3].kwargs["params"]["login_token"] == "login-token"
     )
-    assert session.post.await_args_list[3].kwargs["data"]["token"] == "idp-token"
+    assert session.post.call_args_list[3].kwargs["data"]["token"] == "idp-token"

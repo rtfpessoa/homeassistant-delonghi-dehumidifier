@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -41,7 +42,11 @@ class ProviderSession:
         self.login_started = asyncio.Event()
         self.continue_login = asyncio.Event()
 
+    @asynccontextmanager
     async def get(self, url, **kwargs):
+        yield self._get(url)
+
+    def _get(self, url):
         if self.connection_error:
             raise aiohttp.ClientConnectionError("provider unreachable")
         if url.endswith("/authorize"):
@@ -64,7 +69,11 @@ class ProviderSession:
             )
         raise AssertionError(url)
 
+    @asynccontextmanager
     async def post(self, url, **kwargs):
+        yield await self._post(url, **kwargs)
+
+    async def _post(self, url, **kwargs):
         if url.endswith("/accounts.login"):
             data = kwargs["data"]
             self.logins.append((data["loginID"], data["lang"], data["password"]))

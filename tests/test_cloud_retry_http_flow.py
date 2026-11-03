@@ -64,7 +64,7 @@ class FakeCloud:
     @staticmethod
     def response(*, body=None, location=None):
         return Mock(
-            status=200,
+            status=302 if location else 200,
             headers={"Location": location} if location else {},
             text=AsyncMock(
                 return_value=body if isinstance(body, str) else json.dumps(body)

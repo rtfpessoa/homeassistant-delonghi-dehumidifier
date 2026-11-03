@@ -52,7 +52,7 @@ class RevocableSession(ProviderSession):
         self.error_code = 403042
         self.pause = False
 
-    async def post(self, url, **kwargs):
+    async def _post(self, url, **kwargs):
         if (
             url.endswith("/accounts.login")
             and self.revoked
@@ -65,7 +65,7 @@ class RevocableSession(ProviderSession):
                 await self.continue_login.wait()
             await asyncio.sleep(0.01)
             return self.json_response({"errorCode": self.error_code})
-        return await super().post(url, **kwargs)
+        return await super()._post(url, **kwargs)
 
 
 @pytest.fixture
