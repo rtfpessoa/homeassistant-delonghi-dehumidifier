@@ -13,10 +13,12 @@ async def fetch_device_info(client: APIClient) -> DeviceInfo:
         firmware_version = await client.get_firmware_version()
         hardware_version = await client.get_hardware_version()
         device_dsn = await client.get_first_device()
-    except (aiohttp.ClientError, TimeoutError, TransientCloudError) as err:
+    except (aiohttp.ClientError, TimeoutError, TransientCloudError):
         # The cached initial snapshot may expire while HA forwards platforms.
         # Let HA retry a platform whose later read encounters a transient outage.
-        raise PlatformNotReady("Unable to contact DeLonghi") from err
+        raise PlatformNotReady(
+            translation_domain=DOMAIN, translation_key="cloud_unavailable"
+        ) from None
 
     return DeviceInfo(
         identifiers={(DOMAIN, device_dsn)},

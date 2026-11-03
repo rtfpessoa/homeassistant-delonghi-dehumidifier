@@ -1264,7 +1264,11 @@ class APIClient:
             raise CloudPermissionDeniedError()
         if not 200 <= response.status < 300:
             raise CloudHTTPError(response.status)
-        return await response.json()
+        try:
+            return await response.json()
+        except (aiohttp.ContentTypeError, ValueError):
+            # Successful responses can still contain HTML or undecodable provider data.
+            raise HomeAssistantError("Invalid DeLonghi cloud response") from None
 
     async def get_request(self, path: str) -> dict:
         """Send a GET request to the specified path.

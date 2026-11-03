@@ -6,9 +6,15 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import aiohttp
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD
-from homeassistant.exceptions import PlatformNotReady
+from homeassistant.exceptions import (
+    ConfigEntryNotReady,
+    HomeAssistantError,
+    PlatformNotReady,
+)
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
@@ -18,6 +24,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.delonghi_dehumidifier_api.client import (
     APIClient,
+    CloudPermissionDeniedError,
     InvalidCredentialsError,
     TransientCloudError,
 )
@@ -162,6 +169,7 @@ async def test_http_failure_retries_setup_and_recovers(hass, status, phase):
     ):
         assert not await hass.config_entries.async_setup(entry.entry_id)
         assert entry.state is ConfigEntryState.SETUP_RETRY
+        assert entry.error_reason_translation_key == "cloud_unavailable"
         assert entry.data == original_data
         cloud.failure.release.assert_called_once()
         cloud.failure.text.assert_not_awaited()
@@ -326,11 +334,14 @@ async def test_new_device_claim_survives_initial_property_failure(hass):
         TransientCloudError(),
     ],
 )
-async def test_platform_retry_error_does_not_expose_details(error):
+async def test_platform_retry_error_does_not_expose_details(hass, error):
     client = Mock(get_product_name=AsyncMock(side_effect=error))
-    with pytest.raises(PlatformNotReady, match="Unable to contact DeLonghi") as exc:
+    with pytest.raises(PlatformNotReady) as exc:
         await fetch_device_info(client)
-    assert exc.value.__cause__ is error
+    assert exc.value.translation_domain == DOMAIN
+    assert exc.value.translation_key == "cloud_unavailable"
+    assert exc.value.__cause__ is None
+    assert exc.value.__suppress_context__
     assert "private" not in str(exc.value)
 
 
@@ -343,14 +354,51 @@ async def test_platform_auth_failure_is_not_converted_to_retry():
 
 
 @pytest.mark.parametrize(
-    ("error", "state", "reauth"),
+    ("error", "state", "reauth", "reason"),
     [
-        (InvalidCredentialsError("rejected"), ConfigEntryState.SETUP_ERROR, True),
-        (TimeoutError(), ConfigEntryState.SETUP_RETRY, False),
+        (
+            InvalidCredentialsError("private-cloud-detail"),
+            ConfigEntryState.SETUP_ERROR,
+            True,
+            "credentials_rejected",
+        ),
+        (
+            TimeoutError("private-cloud-detail"),
+            ConfigEntryState.SETUP_RETRY,
+            False,
+            "cloud_unavailable",
+        ),
+        (
+            CloudPermissionDeniedError(),
+            ConfigEntryState.SETUP_ERROR,
+            False,
+            "cloud_permission_denied",
+        ),
+        (
+            ConfigEntryNotReady(
+                "private-cloud-detail",
+                translation_domain="foreign",
+                translation_key="foreign_key",
+            ),
+            ConfigEntryState.SETUP_ERROR,
+            False,
+            "invalid_cloud_response",
+        ),
+        (
+            HomeAssistantError(
+                "private-cloud-detail",
+                translation_domain="foreign",
+                translation_key="foreign_key",
+                translation_placeholders={"content": "private-cloud-detail"},
+            ),
+            ConfigEntryState.SETUP_ERROR,
+            False,
+            "invalid_cloud_response",
+        ),
     ],
 )
 async def test_initial_property_failure_cleans_up_and_preserves_auth(
-    hass, error, state, reauth
+    hass, error, state, reauth, reason, caplog
 ):
     """Property prefetch closes the failed client and classifies errors correctly."""
     entry = bound_entry(
@@ -383,6 +431,9 @@ async def test_initial_property_failure_cleans_up_and_preserves_auth(
         assert not await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         assert entry.state is state
+        assert entry.error_reason_translation_key == reason
+        assert entry.error_reason_translation_placeholders is None
+        assert "private-cloud-detail" not in caplog.text
         assert (
             bool(hass.config_entries.flow.async_progress_by_handler(DOMAIN)) is reauth
         )
@@ -393,3 +444,79 @@ async def test_initial_property_failure_cleans_up_and_preserves_auth(
         assert not er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
         if state is ConfigEntryState.SETUP_RETRY:
             entry.async_cancel_retry_setup()
+
+
+async def test_forbidden_device_read_surfaces_account_permission(hass):
+    entry = bound_entry(
+        domain=DOMAIN,
+        dsn="device-a",
+        data={
+            CONF_LANGUAGE: "en",
+            CONF_EMAIL: "user@example.test",
+            CONF_PASSWORD: "secret",
+        },
+    )
+    entry.add_to_hass(hass)
+    cloud = FakeCloud(403, "properties")
+    with patch(
+        "custom_components.delonghi_dehumidifier_api.aiohttp_client.async_get_clientsession",
+        return_value=cloud,
+    ):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.error_reason_translation_key == "cloud_permission_denied"
+    assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+
+
+@pytest.mark.parametrize(
+    ("content_type", "body"),
+    [
+        ("application/json", b"private-cloud-data"),
+        ("application/json", b"\xffprivate-cloud-data"),
+        ("text/html", b"<h1>private-cloud-data</h1>"),
+    ],
+)
+async def test_invalid_successful_discovery_response_has_safe_setup_reason(
+    hass, socket_enabled, caplog, content_type, body
+):
+    entry = bound_entry(
+        domain=DOMAIN,
+        dsn="device-a",
+        data={
+            CONF_LANGUAGE: "en",
+            CONF_EMAIL: "user@example.test",
+            CONF_PASSWORD: "secret",
+        },
+    )
+    entry.add_to_hass(hass)
+    paths = []
+
+    async def invalid_response(request):
+        paths.append(request.path)
+        return web.Response(body=body, content_type=content_type)
+
+    app = web.Application()
+    app.router.add_get("/apiv1/devices.json", invalid_response)
+    async with TestServer(app) as server, aiohttp.ClientSession() as transport:
+
+        class LocalSession:
+            def get(self, url, **kwargs):
+                return transport.get(server.make_url("/apiv1/devices.json"), **kwargs)
+
+        with (
+            patch(
+                "custom_components.delonghi_dehumidifier_api.aiohttp_client.async_get_clientsession",
+                return_value=LocalSession(),
+            ),
+            patch.object(
+                APIClient, "get_access_token", AsyncMock(return_value="token")
+            ),
+        ):
+            assert not await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.error_reason_translation_key == "invalid_cloud_response"
+    assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert paths == ["/apiv1/devices.json"]
+    assert "private-cloud-data" not in caplog.text

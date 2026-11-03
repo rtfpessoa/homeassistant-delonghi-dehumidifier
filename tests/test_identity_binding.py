@@ -155,6 +155,7 @@ async def test_legacy_ambiguity_is_retryable_without_network(hass):
         )
     with patch.object(APIClient, "authenticate", AsyncMock()) as auth:
         await assert_legacy_binding_pending(hass, entry)
+    assert entry.error_reason_translation_key == "binding_confirmation"
     assert ir.async_get(hass).async_get_issue(
         DOMAIN, f"device_binding_{entry.entry_id}"
     )

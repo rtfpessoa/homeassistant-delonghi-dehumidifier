@@ -188,6 +188,36 @@
     },
     "ownership_recovery": {
       "message": "Device ownership needs recovery. Open Repairs to review the device binding."
+    },
+    "setup_settings_changed": {
+      "message": "The integration settings changed during setup. Home Assistant will try again."
+    },
+    "binding_recovery": {
+      "message": "The stored device binding could not be verified. Open Repairs to review the binding."
+    },
+    "entry_disabled": {
+      "message": "This integration entry is disabled or no longer present."
+    },
+    "binding_confirmation": {
+      "message": "Open Repairs to confirm which appliance belongs to this entry."
+    },
+    "authentication_incomplete": {
+      "message": "The De’Longhi cloud did not complete sign-in. Home Assistant will try again."
+    },
+    "device_not_available": {
+      "message": "The selected appliance is unavailable on this account. Verify access in the De’Longhi app and review Repairs."
+    },
+    "no_devices": {
+      "message": "The De’Longhi account returned no appliances. Check the account in the De’Longhi app."
+    },
+    "cloud_unavailable": {
+      "message": "Unable to contact the De’Longhi cloud. Home Assistant will try again."
+    },
+    "invalid_device_list": {
+      "message": "The De’Longhi cloud returned an invalid device list. Home Assistant will try again."
+    },
+    "invalid_cloud_response": {
+      "message": "The De’Longhi cloud returned an unexpected response. Check access in the app and reload the integration."
     }
   },
   "common": {

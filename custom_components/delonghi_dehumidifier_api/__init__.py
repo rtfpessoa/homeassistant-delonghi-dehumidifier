@@ -11,6 +11,7 @@ from homeassistant.const import CONF_EMAIL, CONF_LANGUAGE, CONF_PASSWORD, Platfo
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
+    ConfigEntryError,
     ConfigEntryNotReady,
     HomeAssistantError,
 )
@@ -19,6 +20,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .client import (
     APIClient,
+    CloudPermissionDeniedError,
     DeviceNotAvailableError,
     InvalidCredentialsError,
     InvalidDeviceListError,
@@ -63,23 +65,37 @@ type DeLonghiDehumidifierConfigEntry = ConfigEntry[APIClient]
 _LOGGER = logging.getLogger(__name__)
 
 
+class _SetupRetry(ConfigEntryNotReady):
+    """A local reason for Home Assistant to retry this entry."""
+
+    def __init__(self, key: str) -> None:
+        super().__init__(translation_domain=DOMAIN, translation_key=key)
+
+
+class _RestartRequired(ConfigEntryError):
+    """Keep the entry stopped until Home Assistant restarts."""
+
+    def __init__(self) -> None:
+        super().__init__(translation_domain=DOMAIN, translation_key="restart_required")
+
+
 def _check_setup_current(hass, entry, dsn, client):
     """Reject settings changes separately from actual device binding failures."""
     if device_needs_restart(hass, dsn):
-        raise HomeAssistantError("Restart Home Assistant before using this integration")
+        raise _RestartRequired()
     if (
         hass.config_entries.async_get_entry(entry.entry_id) is not entry
         or entry.disabled_by
         or not client_settings_match(entry, client)
     ):
-        raise ConfigEntryNotReady("Integration settings changed during setup") from None
+        raise _SetupRetry("setup_settings_changed") from None
     if (
         entry.data.get(CONF_DSN) != dsn
         or entry.unique_id != device_unique_id(dsn)
         or any(owner is not entry for owner in claimants(hass, dsn))
     ):
         create_binding_issue(hass, entry)
-        raise ConfigEntryNotReady("Device identity needs recovery")
+        raise _SetupRetry("binding_recovery")
 
 
 async def _cleanup_platforms(hass, entry, dsn):
@@ -91,14 +107,10 @@ async def _cleanup_platforms(hass, entry, dsn):
         raise
     except Exception:  # noqa: BLE001 - any partial cleanup requires a restart
         require_restart(hass, entry.entry_id, dsn)
-        raise HomeAssistantError(
-            "Restart Home Assistant before reloading this integration"
-        ) from None
+        raise _RestartRequired() from None
     if not result:
         require_restart(hass, entry.entry_id, dsn)
-        raise HomeAssistantError(
-            "Restart Home Assistant before reloading this integration"
-        )
+        raise _RestartRequired()
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -114,51 +126,45 @@ async def async_setup_entry(
     """Set up DeLonghi Dehumidifier from a config entry."""
 
     if entry.entry_id in restart_required_entries(hass):
-        raise HomeAssistantError(
-            "Restart Home Assistant before reloading this integration"
-        )
+        raise _RestartRequired()
     if (
         entry.disabled_by
         or hass.config_entries.async_get_entry(entry.entry_id) is not entry
     ):
-        raise ConfigEntryNotReady("Integration is not enabled")
+        raise _SetupRetry("entry_disabled")
     if device_needs_restart(hass, entry.data.get(CONF_DSN)):
-        raise HomeAssistantError("Restart Home Assistant before using this integration")
+        raise _RestartRequired()
     async with binding_lock(hass):
         try:
             journal = await reload_journal(hass)
-        except ClaimJournalError as err:
+        except ClaimJournalError:
             if device_needs_restart(hass, entry.data.get(CONF_DSN)):
-                raise HomeAssistantError(
-                    "Restart Home Assistant before using this integration"
-                ) from None
+                raise _RestartRequired() from None
             if (
                 entry.disabled_by
                 or hass.config_entries.async_get_entry(entry.entry_id) is not entry
             ):
-                raise ConfigEntryNotReady("Integration is not enabled") from None
+                raise _SetupRetry("entry_disabled") from None
             create_binding_issue(hass, entry)
-            raise ConfigEntryNotReady("Device ownership needs recovery") from err
+            raise _SetupRetry("ownership_recovery") from None
         if (
             entry.disabled_by
             or hass.config_entries.async_get_entry(entry.entry_id) is not entry
         ):
-            raise ConfigEntryNotReady("Integration is not enabled")
+            raise _SetupRetry("entry_disabled")
         dsn = entry.data.get(CONF_DSN)
         if device_needs_restart(hass, dsn):
-            raise HomeAssistantError(
-                "Restart Home Assistant before using this integration"
-            )
+            raise _RestartRequired()
         if dsn is None:
             create_binding_issue(hass, entry)
-            raise ConfigEntryNotReady("Device identity needs confirmation")
+            raise _SetupRetry("binding_confirmation")
         elif (
             not usable_dsn(dsn)
             or entry.unique_id != device_unique_id(dsn)
             or any(owner is not entry for owner in claimants(hass, dsn))
         ):
             create_binding_issue(hass, entry)
-            raise ConfigEntryNotReady("Device identity needs recovery")
+            raise _SetupRetry("binding_recovery")
         election = journal.get(device_unique_id(dsn))
         transfer = bool(entry.data.get(CONF_TRANSFER))
         token = entry.data.get(CONF_ENROLLMENT)
@@ -176,7 +182,7 @@ async def async_setup_entry(
             )
         ):
             create_binding_issue(hass, entry)
-            raise ConfigEntryNotReady("Device identity needs recovery")
+            raise _SetupRetry("binding_recovery")
 
     settings = {**entry.data, **entry.options}
     language = settings[CONF_LANGUAGE]
@@ -190,7 +196,7 @@ async def async_setup_entry(
     try:
         try:
             if not await client.authenticate():
-                raise ConfigEntryNotReady("Unable to authenticate with DeLonghi")
+                raise _SetupRetry("authentication_incomplete")
             await client.verify_device(dsn)
             async with binding_lock(hass):
                 current_journal = await reload_journal(hass)
@@ -199,27 +205,23 @@ async def async_setup_entry(
                     bool(entry.data.get(CONF_TRANSFER)) != transfer
                     or entry.data.get(CONF_ENROLLMENT) != token
                 ):
-                    raise ConfigEntryNotReady(
-                        "Integration settings changed during setup"
-                    )
+                    raise _SetupRetry("setup_settings_changed")
                 if current_journal.get(device_unique_id(dsn)) != election:
                     create_binding_issue(hass, entry)
-                    raise ConfigEntryNotReady("Device identity needs recovery")
+                    raise _SetupRetry("binding_recovery")
                 if election is None or election["owner"] != entry.entry_id:
                     if not enrolling or (
                         election and active_commands(hass, election["owner"])
                     ):
                         create_binding_issue(hass, entry)
-                        raise ConfigEntryNotReady("Device ownership needs recovery")
+                        raise _SetupRetry("ownership_recovery")
                     await save_election(hass, dsn, entry.entry_id, set())
                     _check_setup_current(hass, entry, dsn, client)
                     if (
                         bool(entry.data.get(CONF_TRANSFER)) != transfer
                         or entry.data.get(CONF_ENROLLMENT) != token
                     ):
-                        raise ConfigEntryNotReady(
-                            "Integration settings changed during setup"
-                        )
+                        raise _SetupRetry("setup_settings_changed")
                 if transfer or token:
                     data = dict(entry.data)
                     data.pop(CONF_TRANSFER, None)
@@ -232,25 +234,36 @@ async def async_setup_entry(
             # Their subsequent reads share the client's normal property cache.
             await client.get_properties()
             _check_setup_current(hass, entry, dsn, client)
-        except InvalidCredentialsError as err:
+        except InvalidCredentialsError:
             _check_setup_current(hass, entry, dsn, client)
-            raise ConfigEntryAuthFailed from err
-        except DeviceNotAvailableError as err:
-            _check_setup_current(hass, entry, dsn, client)
-            create_binding_issue(hass, entry)
-            raise ConfigEntryNotReady("Selected device is not available") from err
-        except ClaimJournalError as err:
+            raise ConfigEntryAuthFailed(
+                translation_domain=DOMAIN, translation_key="credentials_rejected"
+            ) from None
+        except DeviceNotAvailableError:
             _check_setup_current(hass, entry, dsn, client)
             create_binding_issue(hass, entry)
-            raise ConfigEntryNotReady("Device ownership needs recovery") from err
-        except NoDevicesError as err:
-            raise ConfigEntryNotReady(
-                "No devices found in the DeLonghi account"
-            ) from err
-        except (aiohttp.ClientError, TimeoutError, TransientCloudError) as err:
-            raise ConfigEntryNotReady("Unable to contact DeLonghi") from err
-        except InvalidDeviceListError as err:
-            raise ConfigEntryNotReady("Unable to discover DeLonghi devices") from err
+            raise _SetupRetry("device_not_available") from None
+        except ClaimJournalError:
+            _check_setup_current(hass, entry, dsn, client)
+            create_binding_issue(hass, entry)
+            raise _SetupRetry("ownership_recovery") from None
+        except NoDevicesError:
+            raise _SetupRetry("no_devices") from None
+        except (aiohttp.ClientError, TimeoutError, TransientCloudError):
+            raise _SetupRetry("cloud_unavailable") from None
+        except InvalidDeviceListError:
+            raise _SetupRetry("invalid_device_list") from None
+        except (_SetupRetry, _RestartRequired):
+            raise
+        except CloudPermissionDeniedError:
+            raise ConfigEntryError(
+                translation_domain=DOMAIN, translation_key="cloud_permission_denied"
+            ) from None
+        except HomeAssistantError:
+            # Unknown replies need attention; only known transient failures retry.
+            raise ConfigEntryError(
+                translation_domain=DOMAIN, translation_key="invalid_cloud_response"
+            ) from None
 
         entry.runtime_data = client
         client.device_write_guard = lambda: command_guard(hass, entry, dsn, client)
@@ -271,9 +284,7 @@ async def async_setup_entry(
             raise
         except Exception:  # noqa: BLE001 - forwarding may have partially completed
             require_restart(hass, entry.entry_id, dsn)
-            raise HomeAssistantError(
-                "Restart Home Assistant before reloading this integration"
-            ) from None
+            raise _RestartRequired() from None
         setup_error = None
         try:
             _check_setup_current(hass, entry, dsn, client)
@@ -286,7 +297,9 @@ async def async_setup_entry(
             _check_setup_current(hass, entry, dsn, client)
             if setup_error is not None:
                 raise setup_error
-            raise ConfigEntryAuthFailed
+            raise ConfigEntryAuthFailed(
+                translation_domain=DOMAIN, translation_key="credentials_rejected"
+            )
         _remove_retired_buttons(hass, entry)
         entry.async_on_unload(entry.add_update_listener(_async_update_options))
         setup_complete = True
@@ -331,9 +344,7 @@ async def async_unload_entry(
 ) -> bool:
     """Unload a config entry."""
     if entry.entry_id in restart_required_entries(hass):
-        raise HomeAssistantError(
-            "Restart Home Assistant before reloading this integration"
-        )
+        raise _RestartRequired()
     unloading_entries(hass).add(entry.entry_id)
     dsn = entry.runtime_data.device_dsn
     completed = False
