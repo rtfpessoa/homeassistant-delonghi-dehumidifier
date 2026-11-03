@@ -211,7 +211,8 @@ async def test_old_shared_read_drains_before_fresh_observation(
             old, command, *new_readers, return_exceptions=True
         )
         if outcome == "timeout":
-            assert isinstance(results[1], TimeoutError)
+            assert isinstance(results[1], HomeAssistantError)
+            assert results[1].translation_key == "command_connection_failed"
             assert all(result is None for result in (results[0], *results[2:]))
         else:
             assert all(result is None for result in results)
@@ -274,8 +275,9 @@ async def test_ambiguous_command_discards_old_poll_and_recovers(hass, device, ou
             with pytest.raises(asyncio.CancelledError):
                 await command
         else:
-            with pytest.raises(TimeoutError, match="response lost"):
+            with pytest.raises(HomeAssistantError) as error:
                 await command
+            assert error.value.translation_key == "command_connection_failed"
         assert hass.states.get(entity_id).state == "on"
         assert calls == 1
         release.set()
@@ -318,10 +320,11 @@ async def test_ambiguous_command_without_old_poll_refreshes_once(
         raise TimeoutError("response lost")
 
     post.side_effect = write
-    with pytest.raises(TimeoutError, match="response lost"):
+    with pytest.raises(HomeAssistantError) as error:
         await hass.services.async_call(
             "humidifier", service, {"entity_id": entity_id, **data}, blocking=True
         )
+    assert error.value.translation_key == "command_connection_failed"
     await hass.async_block_till_done(wait_background_tasks=True)
     state = hass.states.get(entity_id)
     assert (
@@ -387,10 +390,11 @@ async def test_preflight_timeout_causes_only_one_bounded_refresh(hass, loaded_en
     with patch.object(
         client, "get_new_access_token", AsyncMock(side_effect=TimeoutError("offline"))
     ) as login:
-        with pytest.raises(TimeoutError, match="offline"):
+        with pytest.raises(HomeAssistantError) as error:
             await hass.services.async_call(
                 "humidifier", "turn_off", {"entity_id": entity_id}, blocking=True
             )
+        assert error.value.translation_key == "command_connection_failed"
         await hass.async_block_till_done(wait_background_tasks=True)
         assert login.await_count == 2
     assert hass.states.get(entity_id).state == "unavailable"
@@ -416,8 +420,9 @@ async def test_ambiguous_command_finishing_after_unload_does_not_refresh(hass, d
             await asyncio.wait_for(started.wait(), 3)
             assert await hass.config_entries.async_unload(entry.entry_id)
             release.set()
-            with pytest.raises(TimeoutError, match="response lost"):
+            with pytest.raises(HomeAssistantError) as error:
                 await command
+            assert error.value.translation_key == "command_connection_failed"
             await hass.async_block_till_done(wait_background_tasks=True)
             schedule.assert_not_called()
             get.assert_not_awaited()

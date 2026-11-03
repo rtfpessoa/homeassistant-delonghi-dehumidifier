@@ -314,14 +314,18 @@ async def command_guard(hass: HomeAssistant, entry: ConfigEntry, dsn: str, clien
         def require_current_runtime() -> None:
             if device_needs_restart(hass, dsn):
                 raise HomeAssistantError(
-                    "Restart Home Assistant before using this integration"
+                    "Restart Home Assistant before using this integration",
+                    translation_domain=DOMAIN,
+                    translation_key="restart_required",
                 ) from None
             if (
                 not runtime_is_current(hass, entry, client)
                 or client.invalid_credentials
             ):
                 raise HomeAssistantError(
-                    "Integration is changing; try again after reload"
+                    "Integration is changing; try again after reload",
+                    translation_domain=DOMAIN,
+                    translation_key="settings_changing",
                 ) from None
 
         require_current_runtime()
@@ -336,7 +340,11 @@ async def command_guard(hass: HomeAssistant, entry: ConfigEntry, dsn: str, clien
         except ClaimJournalError:
             require_current_runtime()
             create_binding_issue(hass, entry)
-            raise HomeAssistantError("Device ownership needs recovery") from None
+            raise HomeAssistantError(
+                "Device ownership needs recovery",
+                translation_domain=DOMAIN,
+                translation_key="ownership_recovery",
+            ) from None
         commands = hass.data.setdefault(f"{DOMAIN}_active_commands", {})
         commands[entry.entry_id] = commands.get(entry.entry_id, 0) + 1
     try:

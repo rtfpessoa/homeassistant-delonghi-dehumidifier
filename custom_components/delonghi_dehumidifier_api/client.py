@@ -18,7 +18,7 @@ import aiohttp
 from homeassistant.exceptions import HomeAssistantError
 
 from .action_refresh import ActionRefresh
-from .const import REAL_FEEL_ACTIVATION_PAYLOAD, REAL_FEEL_DEACTIVATION_PAYLOAD
+from .const import DOMAIN, REAL_FEEL_ACTIVATION_PAYLOAD, REAL_FEEL_DEACTIVATION_PAYLOAD
 from .humidifier_commands import HumidifierCommands
 
 # API Docs: https://docs.aylanetworks.com/reference
@@ -339,6 +339,17 @@ class InvalidCredentialsError(HomeAssistantError):
     """The provider rejected the account credentials."""
 
 
+class CloudPermissionDeniedError(HomeAssistantError):
+    """The account cannot perform a cloud request on the selected appliance."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The DeLonghi account does not have permission for this request (HTTP 403)",
+            translation_domain=DOMAIN,
+            translation_key="cloud_permission_denied",
+        )
+
+
 class TransientCloudError(HomeAssistantError):
     """The cloud service is temporarily unavailable or rate limiting requests."""
 
@@ -406,6 +417,8 @@ def _safe_property_error(error: Exception) -> Exception:
         return aiohttp.ClientConnectionError(message)
     if isinstance(error, TransientCloudError):
         return TransientCloudError(message)
+    if isinstance(error, CloudPermissionDeniedError):
+        return CloudPermissionDeniedError()
     return HomeAssistantError(message)
 
 
@@ -1247,6 +1260,8 @@ class APIClient:
     async def _read_response(response: aiohttp.ClientResponse) -> dict:
         """Decode a successful response or report its HTTP status."""
         _raise_for_transient_response(response)
+        if response.status == HTTPStatus.FORBIDDEN:
+            raise CloudPermissionDeniedError()
         if not 200 <= response.status < 300:
             raise CloudHTTPError(response.status)
         return await response.json()

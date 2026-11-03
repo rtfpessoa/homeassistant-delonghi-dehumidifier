@@ -19,7 +19,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .client import APIClient, OffOnStatus
 from .const import DOMAIN
-from .entity import AuthAvailabilityEntity
+from .entity import AuthAvailabilityEntity, translate_command_errors
 from .utils import fetch_device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -103,6 +103,7 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
         """If the switch is currently on or off."""
         return self._is_on
 
+    @translate_command_errors
     async def async_turn_on(self, **kwargs):
         """Turn the switch on."""
         _LOGGER.debug("Turning on switch")
@@ -121,6 +122,7 @@ class GenericOffOnSwitchSensor(AuthAvailabilityEntity, SwitchEntity):
             self._is_on = True
             self._skip_next_poll = True
 
+    @translate_command_errors
     async def async_turn_off(self, **kwargs):
         """Turn the switch off."""
         _LOGGER.debug("Turning off switch")

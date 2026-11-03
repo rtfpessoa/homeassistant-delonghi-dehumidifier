@@ -164,6 +164,30 @@
     },
     "real_feel_enter_write_failed": {
       "message": "The Real Feel request failed; the device may have received it. Check the De'Longhi app before trying again."
+    },
+    "credentials_rejected": {
+      "message": "De’Longhi rejected the account credentials. Reauthenticate the integration."
+    },
+    "command_connection_failed": {
+      "message": "The cloud could not confirm the command. Check the appliance in the De’Longhi app before trying again."
+    },
+    "command_failed": {
+      "message": "The command failed. Check the appliance in the De’Longhi app before trying again."
+    },
+    "unsupported_mode": {
+      "message": "This dehumidifier mode is not supported."
+    },
+    "cloud_permission_denied": {
+      "message": "The De’Longhi account does not have permission for this request (HTTP 403)."
+    },
+    "restart_required": {
+      "message": "Restart Home Assistant before using this integration again."
+    },
+    "settings_changing": {
+      "message": "The integration is changing. Try again after it reloads."
+    },
+    "ownership_recovery": {
+      "message": "Device ownership needs recovery. Open Repairs to review the device binding."
     }
   },
   "common": {
