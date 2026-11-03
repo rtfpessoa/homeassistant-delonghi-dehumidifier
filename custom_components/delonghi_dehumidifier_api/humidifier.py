@@ -123,7 +123,7 @@ class DehumidifierEntity(AuthAvailabilityEntity, HumidifierEntity):
 
     _attr_should_poll = True
     _attr_has_entity_name = True
-    _attr_translation_key = "unit"
+    _attr_name = None
     _attr_device_class = HumidifierDeviceClass.DEHUMIDIFIER
     _attr_max_humidity = 100
     _attr_min_humidity = 0
