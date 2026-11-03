@@ -3,6 +3,25 @@
 import json
 import sys
 from pathlib import Path
+from typing import Any
+
+PACKAGE = Path("custom_components/delonghi_dehumidifier_api")
+CONFIG_FLOW = PACKAGE / "config_flow.py"
+
+
+def coverage_error(module: Path, records: dict[str, Any]) -> str | None:
+    """Describe the unmet rule for one module, if any."""
+    record = records.get(module.as_posix())
+    if record is None:
+        return f"{module} is missing from the coverage report"
+    summary = record["summary"]
+    covered, total = summary["covered_lines"], summary["num_statements"]
+    if module == CONFIG_FLOW:
+        if covered < total or summary["missing_branches"]:
+            return f"{module} requires all statements and branches to be covered"
+    elif total and covered * 100 <= total * 95:
+        return f"{module} covers {covered}/{total} statements (must exceed 95%)"
+    return None
 
 
 def main() -> int:
@@ -12,30 +31,15 @@ def main() -> int:
         raise SystemExit(
             "Generate the report with --cov-branch to check the config flow."
         )
-
-    package = Path("custom_components/delonghi_dehumidifier_api")
-    if not (package / "config_flow.py").is_file():
+    if not CONFIG_FLOW.is_file():
         raise SystemExit("Run the coverage check from the repository root.")
-    failures = []
-    for module in sorted(package.rglob("*.py")):
-        record = report["files"].get(module.as_posix())
-        if record is None:
-            failures.append(f"{module} is missing from the coverage report")
-            continue
-        summary = record["summary"]
-        covered, total = summary["covered_lines"], summary["num_statements"]
-        if module == package / "config_flow.py":
-            if covered < total or summary["missing_branches"]:
-                failures.append(
-                    f"{module} requires all statements and branches to be covered"
-                )
-        elif total and covered * 100 <= total * 95:
-            failures.append(
-                f"{module} covers {covered}/{total} statements (must exceed 95%)"
-            )
-    for failure in failures:
-        print(failure, file=sys.stderr)
-    return int(bool(failures))
+
+    failed = False
+    for module in sorted(PACKAGE.rglob("*.py")):
+        if error := coverage_error(module, report["files"]):
+            print(error, file=sys.stderr)
+            failed = True
+    return int(failed)
 
 
 if __name__ == "__main__":
