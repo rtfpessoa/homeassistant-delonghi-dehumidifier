@@ -8,19 +8,27 @@
           "password": "Password"
         },
         "data_description": {
-          "language": "Language code sent to De'Longhi when signing in."
+          "language": "Language code sent to De'Longhi when signing in.",
+          "email": "Email address of the De’Longhi account that lists the appliance in the app.",
+          "password": "Current password for that De’Longhi account."
         }
       },
       "reauth_confirm": {
         "description": "Enter the password for {email} to reconnect your De'Longhi account.",
         "data": {
           "password": "Password"
+        },
+        "data_description": {
+          "password": "Current password for the De’Longhi account shown above."
         }
       },
       "select_device": {
         "description": "Select the intended device. Identifiers are private; if multiple devices are listed, verify the association before choosing. List order does not identify a device.",
         "data": {
           "device_dsn": "Device"
+        },
+        "data_description": {
+          "device_dsn": "Choose the identifier of the appliance this entry should control."
         }
       },
       "reconfigure": {

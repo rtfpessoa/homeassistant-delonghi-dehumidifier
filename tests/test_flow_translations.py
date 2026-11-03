@@ -31,6 +31,17 @@ def test_runtime_english_matches_source():
     assert source == runtime
 
 
+@pytest.mark.parametrize("locale", ["en", "de"])
+@pytest.mark.parametrize("category", ["config", "options"])
+async def test_each_form_field_has_an_explanation(hass, locale, category):
+    resources = await async_get_translations(hass, locale, category, [DOMAIN])
+    fields = [key for key in resources if ".step." in key and ".data." in key]
+    assert fields
+    for field in fields:
+        description = resources[field.replace(".data.", ".data_description.")]
+        assert description and "[%key:" not in description
+
+
 @pytest.mark.parametrize("flow_type", ["config", "options"])
 @pytest.mark.parametrize(
     ("failure", "expected"),

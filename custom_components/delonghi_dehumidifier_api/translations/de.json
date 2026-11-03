@@ -8,19 +8,27 @@
           "password": "Passwort"
         },
         "data_description": {
-          "language": "Sprachcode, der bei der Anmeldung an De'Longhi gesendet wird."
+          "language": "Sprachcode, der bei der Anmeldung an De'Longhi gesendet wird.",
+          "email": "E-Mail-Adresse des De’Longhi-Kontos, in dessen App das Gerät angezeigt wird.",
+          "password": "Aktuelles Passwort dieses De’Longhi-Kontos."
         }
       },
       "reauth_confirm": {
         "description": "Gib das Passwort für {email} ein, um dein De'Longhi-Konto erneut zu verbinden.",
         "data": {
           "password": "Passwort"
+        },
+        "data_description": {
+          "password": "Aktuelles Passwort des oben angegebenen De’Longhi-Kontos."
         }
       },
       "select_device": {
         "description": "Wähle das gewünschte Gerät. Kennungen sind vertraulich; prüfe bei mehreren Geräten die Zuordnung vor der Auswahl. Die Reihenfolge zeigt die Zuordnung nicht an.",
         "data": {
           "device_dsn": "Gerät"
+        },
+        "data_description": {
+          "device_dsn": "Wähle die Kennung des Geräts, das dieser Eintrag steuern soll."
         }
       },
       "reconfigure": {
