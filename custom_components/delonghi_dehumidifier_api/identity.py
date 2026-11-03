@@ -125,6 +125,17 @@ def _write_journal(path: str, claims: dict) -> None:
         raise ClaimJournalError("Cannot save device ownership") from err
 
 
+async def read_device_owner(hass: HomeAssistant, key: str | None) -> str | None:
+    """Read a committed owner without changing the cache or blocking command fences."""
+    path = hass.config.path(".storage", f"{DOMAIN}.claims")
+
+    def read_owner() -> str | None:
+        record = _read_journal(path).get(key)
+        return record["owner"] if record else None
+
+    return await hass.async_add_executor_job(read_owner)
+
+
 async def load_journal(hass: HomeAssistant) -> dict:
     """Load the journal under the binding lock, without accepting corruption."""
     if JOURNAL_KEY not in hass.data:
