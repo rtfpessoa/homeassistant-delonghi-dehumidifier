@@ -41,6 +41,7 @@ from .identity import (
     ClaimJournalError,
     binding_lock,
     claimants,
+    create_binding_issue,
     device_needs_restart,
     device_unique_id,
     pending_claim,
@@ -376,7 +377,7 @@ class _AccountEdit:
         try:
             owner = await read_device_owner(hass, self.unique_id)
         except ClaimJournalError:
-            return "device_binding_required"
+            owner = None
         if self._settings_changed(hass):
             return "settings_changed"
         dsn = self.data.get(CONF_DSN)
@@ -389,9 +390,11 @@ class _AccountEdit:
             or not usable_dsn(dsn)
             or self.unique_id != device_unique_id(dsn)
             or any(owner is not entry for owner in claimants(hass, dsn))
-            or ir.async_get(hass).async_get_issue(
-                DOMAIN, f"{ISSUE_PREFIX}{entry.entry_id}"
-            )
+        ):
+            create_binding_issue(hass, entry)
+            return "device_binding_required"
+        if ir.async_get(hass).async_get_issue(
+            DOMAIN, f"{ISSUE_PREFIX}{entry.entry_id}"
         ):
             return "device_binding_required"
         return None
