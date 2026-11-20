@@ -841,6 +841,19 @@ class APIClient:
             {"datapoint": {"value": status.value}},
         )
 
+    async def set_rotation_speed(self, speed: int) -> object:
+        """Set the fan rotation speed.
+
+        - 1 Low
+        - 2 Medium
+        - 3 High
+        """
+        device_dsn = urllib.parse.quote(await self.get_first_device(), safe="")
+        return await self.post_request(
+            f"apiv1/dsns/{device_dsn}/properties/rotation_speed/datapoints.json",
+            {"datapoint": {"value": speed}},
+        )
+
     async def get_access_token(self) -> str:
         """Retrieve the access token.
 

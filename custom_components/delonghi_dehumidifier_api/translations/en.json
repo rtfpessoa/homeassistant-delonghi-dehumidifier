@@ -154,6 +154,11 @@
       "swing_mode": {
         "name": "Swing Mode"
       }
+    },
+    "select": {
+      "fan_speed": {
+        "name": "Fan Speed"
+      }
     }
   },
   "exceptions": {
@@ -186,6 +191,9 @@
     },
     "unsupported_mode": {
       "message": "This dehumidifier mode is not supported."
+    },
+    "fan_speed_purifier_only": {
+      "message": "Fan speed can only be adjusted when the appliance is in Purifier mode."
     },
     "cloud_permission_denied": {
       "message": "The De’Longhi account does not have permission for this request (HTTP 403)."

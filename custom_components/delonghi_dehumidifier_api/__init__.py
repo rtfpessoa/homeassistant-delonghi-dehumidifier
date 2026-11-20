@@ -56,6 +56,7 @@ from .identity import (
 _PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.HUMIDIFIER,
+    Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
 ]

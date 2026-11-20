@@ -154,6 +154,11 @@
       "swing_mode": {
         "name": "Schwenkmodus"
       }
+    },
+    "select": {
+      "fan_speed": {
+        "name": "Lüftergeschwindigkeit"
+      }
     }
   },
   "exceptions": {
@@ -186,6 +191,9 @@
     },
     "unsupported_mode": {
       "message": "Dieser Entfeuchtungsmodus wird nicht unterstützt."
+    },
+    "fan_speed_purifier_only": {
+      "message": "Die Lüftergeschwindigkeit kann nur im Luftreiniger-Modus eingestellt werden."
     },
     "cloud_permission_denied": {
       "message": "Das De’Longhi-Konto ist für diese Anfrage nicht berechtigt (HTTP 403)."

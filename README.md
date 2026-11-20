@@ -161,6 +161,7 @@ This custom component creates following entities for the dehumidifier:
 | `binary_sensor` | Device alarm using observed alarm values.                                                                                      |
 | `switch`     | Switch to enable eco mode.                                                                                                       |
 | `switch`     | Switch to enable fan swing.                                                                                                      |
+| `select`     | Selector (`1`, `2`, `3`) to adjust fan speed when in `PURIFIER` mode (unavailable in other modes).                                |
 
 New registry entries for **Current speed (raw)** and **Cloud mode (raw)** are
 initially disabled. To collect their values and history, open the dehumidifier
