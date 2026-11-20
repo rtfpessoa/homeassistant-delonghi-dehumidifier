@@ -25,6 +25,7 @@ _COMMAND_ERROR_KEYS = frozenset(
         "command_failed",
         "credentials_rejected",
         "device_removed",
+        "fan_speed_purifier_only",
         "ownership_recovery",
         "real_feel_enter_write_failed",
         "real_feel_mode_not_ready",
