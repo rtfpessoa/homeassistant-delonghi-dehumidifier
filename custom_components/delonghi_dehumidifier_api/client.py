@@ -1187,7 +1187,8 @@ class APIClient:
             self.session.get(url, headers=headers, params=params, allow_redirects=False)
         )
 
-        signature = response.split("const consentObj2Sig = '")[1].split("';")[0]
+        rest = response.split("const consentObj2Sig = ")[1]
+        signature = rest[1:].split(rest[0])[0]
 
         # Step 6: Authorization
         url = f"https://fidm.eu1.gigya.com/oidc/op/v1.0/{API_KEY}/authorize/continue"
