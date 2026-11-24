@@ -623,3 +623,270 @@ async def test_consent_signature_supports_single_and_double_quotes(quote):
     client = APIClient(session, "en", "user@example.com", "password-secret")
     assert await client.get_new_refresh_token() == "access"
     assert session.get.call_args_list[3].kwargs["params"]["sig"] == "consent-sig"
+
+
+CLIENT_LOGGER = "custom_components.delonghi_dehumidifier_api.client"
+
+
+def _assert_safe_client_logs(caplog, expected_messages, forbidden_values):
+    """Verify expected debug messages without leaking secrets or tracebacks."""
+    records = [record for record in caplog.records if record.name == CLIENT_LOGGER]
+    assert records
+    messages = [record.getMessage() for record in records]
+    for expected in expected_messages:
+        assert expected in messages
+    for record in records:
+        assert record.levelno == logging.DEBUG
+        assert not record.exc_info
+        assert not record.stack_info
+        rendered = record.getMessage()
+        for forbidden in forbidden_values:
+            assert forbidden not in rendered
+    for forbidden in forbidden_values:
+        assert forbidden not in caplog.text
+
+
+async def test_auth_debug_logs_non_2xx_step_without_leaking_secrets(caplog):
+    """Log step name and HTTP status on non-2xx auth responses with zero leakage."""
+    session, responses = authentication_session(failing_step=4, status=403)
+    responses[2].body = json.dumps({"sessionInfo": {"login_token": "secret-token"}})
+    responses[4] = AuthenticationResponse(
+        403,
+        body="<html>secret-consent-body</html>",
+        location="https://secret-location.invalid/?token=secret-loc-token",
+    )
+    client = APIClient(session, "en", "secret-email@example.com", "password-secret")
+    with (
+        caplog.at_level(logging.DEBUG, logger=CLIENT_LOGGER),
+        pytest.raises(HomeAssistantError, match="HTTP 403") as error,
+    ):
+        await client.authenticate()
+
+    forbidden = (
+        "password-secret",
+        "secret-email@example.com",
+        "secret-token",
+        "secret-consent-body",
+        "secret-location.invalid",
+        "secret-loc-token",
+    )
+    _assert_safe_client_logs(caplog, ["Auth step consent: HTTP 403"], forbidden)
+    for secret in forbidden:
+        assert secret not in str(error.value)
+
+
+async def test_auth_debug_logs_consent_parse_error_without_leaking_body(caplog):
+    """Log consent HTTP status and exception class name on parse failure."""
+    session, responses = authentication_session()
+    responses[4].body = "<html><body>secret-consent-html</body></html>"
+    client = APIClient(session, "en", "secret-email@example.com", "password-secret")
+    with (
+        caplog.at_level(logging.DEBUG, logger=CLIENT_LOGGER),
+        pytest.raises(
+            HomeAssistantError, match="Invalid DeLonghi authentication response"
+        ) as error,
+    ):
+        await client.authenticate()
+
+    forbidden = (
+        "secret-consent-html",
+        "password-secret",
+        "secret-email@example.com",
+    )
+    _assert_safe_client_logs(
+        caplog,
+        [
+            "Auth step consent: HTTP 200",
+            "DeLonghi authentication response parse error (IndexError)",
+        ],
+        forbidden,
+    )
+    for secret in forbidden:
+        assert secret not in str(error.value)
+
+
+async def test_auth_debug_logs_missing_oauth_redirect_param_safely(caplog):
+    """Log OAuth redirect status and parameter name without leaking Location."""
+    session, responses = authentication_session()
+    responses[0].status = 302
+    responses[0].headers = {
+        "Location": "https://secret-location.invalid/?other=secret-query-value"
+    }
+    client = APIClient(session, "en", "secret-email@example.com", "password-secret")
+    with (
+        caplog.at_level(logging.DEBUG, logger=CLIENT_LOGGER),
+        pytest.raises(
+            HomeAssistantError, match="Invalid DeLonghi authentication redirect"
+        ) as error,
+    ):
+        await client.authenticate()
+
+    forbidden = (
+        "secret-location.invalid",
+        "secret-query-value",
+        "password-secret",
+        "secret-email@example.com",
+    )
+    _assert_safe_client_logs(
+        caplog,
+        [
+            "Auth step authorize: HTTP 302",
+            "Auth step authorize: invalid or missing redirect parameter context",
+        ],
+        forbidden,
+    )
+    for secret in forbidden:
+        assert secret not in str(error.value)
+
+
+async def test_auth_debug_logs_transport_error_class_only(caplog):
+    """Log only the transport exception class name without URL or query string."""
+    session, _ = authentication_session()
+    session.get.side_effect = aiohttp.ClientConnectionError(
+        "https://host/?code=secret-oauth-code"
+    )
+    client = APIClient(session, "en", "secret-email@example.com", "password-secret")
+    with (
+        caplog.at_level(logging.DEBUG, logger=CLIENT_LOGGER),
+        pytest.raises(
+            TransientCloudError, match="Unable to contact DeLonghi for authentication"
+        ) as error,
+    ):
+        await client.authenticate()
+
+    forbidden = (
+        "https://host",
+        "secret-oauth-code",
+        "password-secret",
+        "secret-email@example.com",
+    )
+    _assert_safe_client_logs(
+        caplog,
+        ["DeLonghi authentication transport error (ClientConnectionError)"],
+        forbidden,
+    )
+    for secret in forbidden:
+        assert secret not in str(error.value)
+
+
+async def test_auth_debug_logs_refresh_redirect_without_leaking_location(caplog):
+    """Log refresh_token HTTP status on 3xx without leaking refresh token or Location."""
+    response = AuthenticationResponse(
+        302, location="https://secret-location.invalid/?token=secret-loc-token"
+    )
+    session = SimpleNamespace(post=Mock(return_value=response))
+    client = APIClient(session, "en", "secret-email@example.com", "password-secret")
+    client.refresh_token = "secret-refresh-token"
+    with (
+        caplog.at_level(logging.DEBUG, logger=CLIENT_LOGGER),
+        pytest.raises(HomeAssistantError, match="HTTP 302") as error,
+    ):
+        await client.get_new_access_token()
+
+    assert response.released
+    forbidden = (
+        "secret-refresh-token",
+        "secret-location.invalid",
+        "secret-loc-token",
+        "password-secret",
+        "secret-email@example.com",
+    )
+    _assert_safe_client_logs(caplog, ["Auth step refresh_token: HTTP 302"], forbidden)
+    for secret in forbidden:
+        assert secret not in str(error.value)
+
+
+@pytest.mark.parametrize("token", ["", None, 42])
+async def test_auth_debug_logs_missing_login_token_safely(token, caplog):
+    """Log login HTTP 200 and missing login token without leaking credentials or body."""
+    session, responses = authentication_session()
+    responses[2].body = json.dumps(
+        {
+            "sessionInfo": {"login_token": token},
+            "secretBodyField": "secret-login-body",
+        }
+    )
+    client = APIClient(session, "en", "secret-email@example.com", "password-secret")
+    with (
+        caplog.at_level(logging.DEBUG, logger=CLIENT_LOGGER),
+        pytest.raises(
+            HomeAssistantError, match="Invalid DeLonghi login token"
+        ) as error,
+    ):
+        await client.authenticate()
+
+    forbidden = (
+        "secret-login-body",
+        "password-secret",
+        "secret-email@example.com",
+    )
+    _assert_safe_client_logs(
+        caplog,
+        [
+            "Auth step login: HTTP 200",
+            "Auth step login: missing login token",
+        ],
+        forbidden,
+    )
+    for secret in forbidden:
+        assert secret not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("payload", "forbidden_tokens"),
+    [
+        (
+            {
+                "access_token": 12345,
+                "refresh_token": "secret-refresh",
+                "expires_in": 3600,
+            },
+            ("12345", "secret-refresh"),
+        ),
+        (
+            {
+                "access_token": "secret-access",
+                "refresh_token": 67890,
+                "expires_in": 3600,
+            },
+            ("secret-access", "67890"),
+        ),
+    ],
+)
+async def test_auth_debug_logs_invalid_token_types_safely(
+    payload, forbidden_tokens, caplog
+):
+    """Log invalid token types without leaking any token values."""
+    session, responses = authentication_session()
+    responses[-1].body = json.dumps(payload)
+    client = APIClient(session, "en", "secret-email@example.com", "password-secret")
+    with (
+        caplog.at_level(logging.DEBUG, logger=CLIENT_LOGGER),
+        pytest.raises(
+            HomeAssistantError, match="Invalid DeLonghi authentication response"
+        ) as error,
+    ):
+        await client.authenticate()
+
+    forbidden = (
+        *forbidden_tokens,
+        "password-secret",
+        "secret-email@example.com",
+    )
+    _assert_safe_client_logs(
+        caplog,
+        [
+            "Auth step authorize: HTTP 302",
+            "Auth step session: HTTP 200",
+            "Auth step login: HTTP 200",
+            "Auth step user_info: HTTP 200",
+            "Auth step consent: HTTP 200",
+            "Auth step continue: HTTP 302",
+            "Auth step idp_token: HTTP 200",
+            "Auth step ayla_token: HTTP 200",
+            "DeLonghi authentication response contained invalid token types",
+        ],
+        forbidden,
+    )
+    for secret in forbidden:
+        assert secret not in str(error.value)
