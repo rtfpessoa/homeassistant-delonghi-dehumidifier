@@ -477,11 +477,59 @@ def _auth_status_error(status: int) -> HomeAssistantError:
     )
 
 
+def _build_risk_context() -> str:
+    """Build the Gigya browser fingerprint payload required for login."""
+    return json.dumps(
+        {
+            "b0": 4494,
+            "b1": [0, 2, 2, 0],
+            "b2": 2,
+            "b3": [],
+            "b4": 2,
+            "b5": 1,
+            "b6": BROWSER_USER_AGENT,
+            "b7": [
+                {
+                    "name": "PDF Viewer",
+                    "filename": "internal-pdf-viewer",
+                    "length": 2,
+                },
+                {
+                    "name": "Chrome PDF Viewer",
+                    "filename": "internal-pdf-viewer",
+                    "length": 2,
+                },
+                {
+                    "name": "Chromium PDF Viewer",
+                    "filename": "internal-pdf-viewer",
+                    "length": 2,
+                },
+                {
+                    "name": "Microsoft Edge PDF Viewer",
+                    "filename": "internal-pdf-viewer",
+                    "length": 2,
+                },
+                {
+                    "name": "WebKit built-in PDF",
+                    "filename": "internal-pdf-viewer",
+                    "length": 2,
+                },
+            ],
+            "b8": datetime.now().strftime("%H:%M:%S"),
+            "b9": 0,
+            "b10": {"state": "denied"},
+            "b11": False,
+            "b13": [5, "440|956|24", False, True],
+        }
+    )
+
+
 async def _auth_text(
-    request: AbstractAsyncContextManager[aiohttp.ClientResponse],
+    request: AbstractAsyncContextManager[aiohttp.ClientResponse], *, step: str
 ) -> str:
     """Read a successful auth body without following or disclosing a redirect."""
     async with request as response:
+        _LOGGER.debug("Auth step %s: HTTP %s", step, response.status)
         _raise_for_transient_response(response)
         if not 200 <= response.status < 300:
             raise _auth_status_error(response.status)
@@ -489,10 +537,11 @@ async def _auth_text(
 
 
 async def _login_token(
-    request: AbstractAsyncContextManager[aiohttp.ClientResponse],
+    request: AbstractAsyncContextManager[aiohttp.ClientResponse], *, step: str
 ) -> str:
     """Only the provider's documented credential rejection triggers reauthentication."""
     async with request as response:
+        _LOGGER.debug("Auth step %s: HTTP %s", step, response.status)
         _raise_for_transient_response(response)
         if response.status not in (200, 400, 401, 403):
             raise _auth_status_error(response.status)
@@ -503,21 +552,31 @@ async def _login_token(
             raise _auth_status_error(response.status)
         token = data["sessionInfo"]["login_token"]
         if not isinstance(token, str) or not token:
+            _LOGGER.debug("Auth step %s: missing login token", step)
             raise HomeAssistantError("Invalid DeLonghi login token")
         return token
 
 
 async def _oauth_parameter(
-    request: AbstractAsyncContextManager[aiohttp.ClientResponse], parameter: str
+    request: AbstractAsyncContextManager[aiohttp.ClientResponse],
+    parameter: str,
+    *,
+    step: str,
 ) -> str:
     """Read one required OAuth redirect parameter, without visiting its location."""
     async with request as response:
+        _LOGGER.debug("Auth step %s: HTTP %s", step, response.status)
         _raise_for_transient_response(response)
         if response.status not in (301, 302, 303, 307, 308):
             raise _auth_status_error(response.status)
         query = urllib.parse.urlsplit(response.headers.get("Location", "")).query
         values = urllib.parse.parse_qs(query, keep_blank_values=True).get(parameter, [])
         if len(values) != 1 or not values[0]:
+            _LOGGER.debug(
+                "Auth step %s: invalid or missing redirect parameter %s",
+                step,
+                parameter,
+            )
             raise HomeAssistantError("Invalid DeLonghi authentication redirect")
         return values[0]
 
@@ -981,13 +1040,19 @@ class APIClient:
         """
         try:
             return await self._refresh_or_login()
-        except (aiohttp.ClientError, TimeoutError):
+        except (aiohttp.ClientError, TimeoutError) as err:
             # Transport exceptions can include the OAuth query string.
+            _LOGGER.debug(
+                "DeLonghi authentication transport error (%s)", type(err).__name__
+            )
             raise TransientCloudError(
                 "Unable to contact DeLonghi for authentication"
             ) from None
-        except (LookupError, TypeError, ValueError, AttributeError):
+        except (LookupError, TypeError, ValueError, AttributeError) as err:
             # The provider's response can contain credentials or personal data.
+            _LOGGER.debug(
+                "DeLonghi authentication response parse error (%s)", type(err).__name__
+            )
             raise HomeAssistantError(
                 "Invalid DeLonghi authentication response"
             ) from None
@@ -1009,6 +1074,7 @@ class APIClient:
         async with self.session.post(
             url, headers=headers, json=body, allow_redirects=False
         ) as response:
+            _LOGGER.debug("Auth step refresh_token: HTTP %s", response.status)
             _raise_for_transient_response(response)
             if 300 <= response.status < 400:
                 raise _auth_status_error(response.status)
@@ -1061,6 +1127,7 @@ class APIClient:
                 url, headers=headers, params=params, allow_redirects=False
             ),
             "context",
+            step="authorize",
         )
 
         # Step 2: Fetch Gigya session data
@@ -1078,7 +1145,8 @@ class APIClient:
             await _auth_text(
                 self.session.get(
                     url, headers=headers, params=params, allow_redirects=False
-                )
+                ),
+                step="session",
             )
         )
 
@@ -1087,50 +1155,6 @@ class APIClient:
         gmid_ticket = response["gmidTicket"]
 
         # Step 3: Login
-        risk_context_json = json.dumps(
-            {
-                "b0": 4494,
-                "b1": [0, 2, 2, 0],
-                "b2": 2,
-                "b3": [],
-                "b4": 2,
-                "b5": 1,
-                "b6": BROWSER_USER_AGENT,
-                "b7": [
-                    {
-                        "name": "PDF Viewer",
-                        "filename": "internal-pdf-viewer",
-                        "length": 2,
-                    },
-                    {
-                        "name": "Chrome PDF Viewer",
-                        "filename": "internal-pdf-viewer",
-                        "length": 2,
-                    },
-                    {
-                        "name": "Chromium PDF Viewer",
-                        "filename": "internal-pdf-viewer",
-                        "length": 2,
-                    },
-                    {
-                        "name": "Microsoft Edge PDF Viewer",
-                        "filename": "internal-pdf-viewer",
-                        "length": 2,
-                    },
-                    {
-                        "name": "WebKit built-in PDF",
-                        "filename": "internal-pdf-viewer",
-                        "length": 2,
-                    },
-                ],
-                "b8": datetime.now().strftime("%H:%M:%S"),
-                "b9": 0,
-                "b10": {"state": "denied"},
-                "b11": False,
-                "b13": [5, "440|956|24", False, True],
-            }
-        )
-
         url = "https://accounts.eu1.gigya.com/accounts.login"
         headers = {"User-Agent": BROWSER_USER_AGENT}
         data = {
@@ -1142,7 +1166,7 @@ class APIClient:
             "includeUserInfo": "true",
             "loginMode": "standard",
             "lang": self.language,
-            "riskContext": await self.url_encode(risk_context_json),
+            "riskContext": await self.url_encode(_build_risk_context()),
             "APIKey": API_KEY,
             "source": "showScreenSet",
             "sdk": "js_latest",
@@ -1154,9 +1178,29 @@ class APIClient:
             "format": "json",
         }
         login_token = await _login_token(
-            self.session.post(url, headers=headers, data=data, allow_redirects=False)
+            self.session.post(url, headers=headers, data=data, allow_redirects=False),
+            step="login",
         )
 
+        code = await self._complete_oidc_consent(
+            context=context,
+            login_token=login_token,
+            gmid=gmid,
+            ucid=ucid,
+            gmid_ticket=gmid_ticket,
+        )
+        return await self._exchange_authorization_code(code)
+
+    async def _complete_oidc_consent(
+        self,
+        *,
+        context: str,
+        login_token: str,
+        gmid: str,
+        ucid: str,
+        gmid_ticket: str,
+    ) -> str:
+        """Fetch Gigya user info, submit consent, and return the OAuth code."""
         # Step 4: Get user info
         url = "https://socialize.eu1.gigya.com/socialize.getUserInfo"
         headers = {"User-Agent": BROWSER_USER_AGENT}
@@ -1176,7 +1220,8 @@ class APIClient:
             await _auth_text(
                 self.session.post(
                     url, headers=headers, data=data, allow_redirects=False
-                )
+                ),
+                step="user_info",
             )
         )
 
@@ -1187,7 +1232,7 @@ class APIClient:
         # Step 5: Consent
         url = "https://aylaopenid.delonghigroup.com/OIDCConsentPage.php"
         headers = {"User-Agent": BROWSER_USER_AGENT}
-        params = {
+        params: dict[str, str | int] = {
             "lang": self.language,
             "context": context,
             "clientID": CLIENT_ID,
@@ -1196,11 +1241,14 @@ class APIClient:
             "UIDSignature": user_uid_signature,
             "signatureTimestamp": user_signature_timestamp,
         }
-        response = await _auth_text(
-            self.session.get(url, headers=headers, params=params, allow_redirects=False)
+        consent_page = await _auth_text(
+            self.session.get(
+                url, headers=headers, params=params, allow_redirects=False
+            ),
+            step="consent",
         )
 
-        rest = response.split("const consentObj2Sig = ")[1]
+        rest = consent_page.split("const consentObj2Sig = ")[1]
         signature = rest[1:].split(rest[0])[0]
 
         # Step 6: Authorization
@@ -1222,14 +1270,13 @@ class APIClient:
             "sig": signature,
             "gmidTicket": gmid_ticket,
         }
-        code = await _oauth_parameter(
+        return await _oauth_parameter(
             self.session.get(
                 url, headers=headers, params=params, allow_redirects=False
             ),
             "code",
+            step="continue",
         )
-
-        return await self._exchange_authorization_code(code)
 
     async def _exchange_authorization_code(self, code: str) -> str:
         """Exchange the authorization code for IDP and Ayla access tokens."""
@@ -1249,7 +1296,8 @@ class APIClient:
             await _auth_text(
                 self.session.post(
                     url, headers=headers, data=data, allow_redirects=False
-                )
+                ),
+                step="idp_token",
             )
         )
 
@@ -1267,7 +1315,8 @@ class APIClient:
             await _auth_text(
                 self.session.post(
                     url, headers=headers, data=data, allow_redirects=False
-                )
+                ),
+                step="ayla_token",
             )
         )
 
@@ -1280,6 +1329,9 @@ class APIClient:
             response["refresh_token"],
         )
         if not isinstance(access_token, str) or not isinstance(refresh_token, str):
+            _LOGGER.debug(
+                "DeLonghi authentication response contained invalid token types"
+            )
             raise HomeAssistantError("Invalid DeLonghi authentication response")
         if not access_token:
             return ""  # The caller treats an empty token as an unconfirmed login.
