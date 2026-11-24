@@ -25,6 +25,7 @@ from custom_components.delonghi_dehumidifier_api.const import DOMAIN
 from custom_components.delonghi_dehumidifier_api.identity import (
     CONF_DSN,
     create_binding_issue,
+    registry_dsns,
 )
 
 DATA = {
@@ -166,6 +167,46 @@ async def test_device_selection_keeps_names_and_discovery_order_on_retry(hass):
         hass.config_entries.flow.async_abort(form["flow_id"])
 
 
+async def test_device_selection_ignores_non_two_tuple_identifiers(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=DATA)
+    entry.add_to_hass(hass)
+    homekit = MockConfigEntry(domain="homekit")
+    homekit.add_to_hass(hass)
+    registry = dr.async_get(hass)
+    registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "private-a")},
+        name="Living room",
+    )
+    registry.async_get_or_create(
+        config_entry_id=homekit.entry_id,
+        identifiers={("homekit", "entry-id", "bridge")},
+        name="HASS Bridge:21064",
+    )
+    registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "private-e", "extra")},
+        name="Extra tuple",
+    )
+    with (
+        patch.object(APIClient, "authenticate", AsyncMock(return_value=True)),
+        patch.object(
+            APIClient, "get_devices", AsyncMock(return_value=["private-a", "private-e"])
+        ),
+        patch.object(APIClient, "post_request", AsyncMock()) as post,
+    ):
+        form = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        form = await hass.config_entries.flow.async_configure(form["flow_id"], DATA)
+        assert field(form, CONF_DSN)["options"] == [
+            ("private-a", "Living room (private-a)"),
+            ("private-e", "private-e"),
+        ]
+        post.assert_not_awaited()
+        hass.config_entries.flow.async_abort(form["flow_id"])
+
+
 async def test_device_selection_keeps_last_named_match_for_shared_identifier(hass):
     registry = dr.async_get(hass)
     separates_shared_devices = hasattr(registry, "async_get_devices")
@@ -265,6 +306,43 @@ async def test_legacy_repair_shows_associated_device_names_without_network(hass,
             for item in _BaseFlowManagerView(None)._prepare_result_json(form)[
                 "data_schema"
             ]
+        }
+        auth.assert_not_awaited()
+        post.assert_not_awaited()
+        manager.async_abort(form["flow_id"])
+        entry.async_cancel_retry_setup()
+
+
+async def test_registry_lookup_and_repair_ignore_non_two_tuple_identifiers(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data=DATA, version=1)
+    entry.add_to_hass(hass)
+    registry = dr.async_get(hass)
+    registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={
+            (DOMAIN, "private-a"),
+            (DOMAIN, "ignored-dsn", "extra"),
+        },
+        name="Living room",
+    )
+    registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("homekit", "entry-id", "bridge")},
+        name="HASS Bridge:21064",
+    )
+    assert registry_dsns(hass, entry) == {"private-a"}
+    with (
+        patch.object(APIClient, "authenticate", AsyncMock()) as auth,
+        patch.object(APIClient, "post_request", AsyncMock()) as post,
+    ):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        assert await async_setup_component(hass, "repairs", {})
+        manager = repairs_flow_manager(hass)
+        form = await manager.async_init(
+            DOMAIN, data={"issue_id": f"device_binding_{entry.entry_id}"}
+        )
+        assert dict(field(form, CONF_DSN)["options"]) == {
+            "private-a": "Living room (private-a)"
         }
         auth.assert_not_awaited()
         post.assert_not_awaited()
