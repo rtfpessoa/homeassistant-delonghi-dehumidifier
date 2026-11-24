@@ -220,6 +220,7 @@ async def test_property_http_failure_retries_before_adding_entities(hass, status
         assert {entity.domain for entity in entities} == {
             "binary_sensor",
             "humidifier",
+            "select",
             "sensor",
             "switch",
         }
@@ -278,6 +279,7 @@ async def test_platform_retry_after_initial_properties_expire(hass):
         assert {entity.domain for entity in entities} == {
             "binary_sensor",
             "humidifier",
+            "select",
             "sensor",
             "switch",
         }

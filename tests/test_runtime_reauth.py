@@ -510,10 +510,11 @@ async def test_rejection_marks_all_entities_unavailable_with_fresh_cache(
         )
     await hass.async_block_till_done()
     assert {entity_id.split(".")[0] for entity_id in entities} == {
+        "binary_sensor",
+        "humidifier",
+        "select",
         "sensor",
         "switch",
-        "humidifier",
-        "binary_sensor",
     }
     assert all(
         hass.states.get(entity_id).state == "unavailable" for entity_id in entities

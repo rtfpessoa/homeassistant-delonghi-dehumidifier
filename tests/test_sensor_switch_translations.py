@@ -169,7 +169,7 @@ async def test_new_sensor_and_switch_names(hass, cloud, language):
     await hass.async_block_till_done()
     registry = er.async_get(hass)
     entries = er.async_entries_for_config_entry(registry, entry.entry_id)
-    assert len(entries) == 16
+    assert len(entries) == 17
     await enable_diagnostics(
         hass,
         entry,
@@ -394,7 +394,7 @@ async def test_upgrade_preserves_all_entities_and_automation(hass, cloud, langua
         )
     await hass.async_block_till_done()
     original_ids = snapshot_ids(registry, entry)
-    assert len(original_ids) == 16
+    assert len(original_ids) == 17
     events = await setup_automation(hass, "switch.my_existing_eco")
 
     assert await hass.config_entries.async_setup(entry.entry_id)
