@@ -271,9 +271,13 @@ class DeLonghiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         for device in devices:
             name = device.name_by_user or device.name
             if name:
-                for domain, dsn in device.identifiers:
-                    if domain == DOMAIN and dsn in labels:
-                        labels[dsn] = f"{name} ({dsn})"
+                for identifier in device.identifiers:
+                    if (
+                        len(identifier) == 2
+                        and identifier[0] == DOMAIN
+                        and identifier[1] in labels
+                    ):
+                        labels[identifier[1]] = f"{name} ({identifier[1]})"
         return vol.Schema({vol.Required(CONF_DSN): vol.In(labels)})
 
     async def _select_device(self, dsn: str) -> ConfigFlowResult:

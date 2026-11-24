@@ -283,10 +283,13 @@ def registry_dsns(
     """Include disabled devices and preserve all pre-existing associations."""
     registry = dr.async_get(hass)
     return {
-        identifier
+        identifier[1]
         for device in dr.async_entries_for_config_entry(registry, entry.entry_id)
-        for domain, identifier in device.identifiers
-        if domain == DOMAIN and isinstance(identifier, str) and identifier
+        for identifier in device.identifiers
+        if len(identifier) == 2
+        and identifier[0] == DOMAIN
+        and isinstance(identifier[1], str)
+        and identifier[1]
     }
 
 

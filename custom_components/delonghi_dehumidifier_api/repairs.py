@@ -79,9 +79,13 @@ class BindingRepair(RepairsFlow):
         candidates = {}
         for device in dr.async_entries_for_config_entry(registry, entry.entry_id):
             name = device.name_by_user or device.name or "DeLonghi Dehumidifier"
-            for domain, dsn in device.identifiers:
-                if domain == DOMAIN and usable_dsn(dsn):
-                    candidates[dsn] = f"{name} ({dsn})"
+            for identifier in device.identifiers:
+                if (
+                    len(identifier) == 2
+                    and identifier[0] == DOMAIN
+                    and usable_dsn(identifier[1])
+                ):
+                    candidates[identifier[1]] = f"{name} ({identifier[1]})"
         if usable_dsn(pinned := entry.data.get(CONF_DSN)):
             candidates.setdefault(pinned, pinned)
         return candidates

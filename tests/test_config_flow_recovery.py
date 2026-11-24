@@ -150,7 +150,16 @@ async def test_selection_labels_support_both_registry_shapes(
     unnamed = SimpleNamespace(
         name_by_user=None, name=None, identifiers={(DOMAIN, "spare")}
     )
-    devices = {"a": named, "b": unnamed} if as_mapping else [named, unnamed]
+    malformed = SimpleNamespace(
+        name_by_user=None,
+        name="Malformed",
+        identifiers={(), ("short",), ("homekit", "entry", "bridge")},
+    )
+    devices = (
+        {"a": named, "b": unnamed, "c": malformed}
+        if as_mapping
+        else [named, unnamed, malformed]
+    )
     with patch.object(
         config_flow.dr, "async_get", return_value=SimpleNamespace(devices=devices)
     ):
