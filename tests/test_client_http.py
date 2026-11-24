@@ -613,3 +613,15 @@ async def test_product_name_does_not_hide_cloud_errors():
     client.get_properties = AsyncMock(side_effect=TransientCloudError("unavailable"))
     with pytest.raises(TransientCloudError, match="unavailable"):
         await client.get_product_name()
+
+
+@pytest.mark.parametrize("quote", ["'", '"'])
+async def test_consent_signature_supports_single_and_double_quotes(quote):
+    """Parse consentObj2Sig regardless of single or double quote delimiters."""
+    session, responses = authentication_session()
+    responses[4] = AuthenticationResponse(
+        200, body=f"const consentObj2Sig = {quote}consent-sig{quote};"
+    )
+    client = APIClient(session, "en", "user@example.com", "password-secret")
+    assert await client.get_new_refresh_token() == "access"
+    assert session.get.call_args_list[3].kwargs["params"]["sig"] == "consent-sig"
