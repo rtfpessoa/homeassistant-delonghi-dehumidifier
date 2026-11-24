@@ -131,13 +131,15 @@ async def test_fan_speed_select_and_mode_availability(hass, device):
     await refresh(hass, entry, fan_speed)
     assert hass.states.get(fan_speed).state == STATE_UNAVAILABLE
 
-    with pytest.raises(ServiceValidationError):
-        await hass.services.async_call(
-            "select",
-            "select_option",
-            {"entity_id": fan_speed, "option": "2"},
-            blocking=True,
-        )
+    before_calls = post.await_count
+    await hass.services.async_call(
+        "select",
+        "select_option",
+        {"entity_id": fan_speed, "option": "2"},
+        blocking=True,
+    )
+    assert post.await_count == before_calls
+    assert hass.states.get(fan_speed).state == STATE_UNAVAILABLE
 
     # Returning to Purifier restores availability.
     properties.update(device_mode=3, current_speed=2, rotation_speed=2)
@@ -151,6 +153,19 @@ async def test_fan_speed_invalid_option_rejected(hass, device):
     entity = FanSpeedSelect("TEST-DSN", AsyncMock(), entry.runtime_data)
     with pytest.raises(ServiceValidationError):
         await entity.async_select_option("9")
+
+
+async def test_fan_speed_non_purifier_mode_rejected(hass, device):
+    """Direct entity calls reject speed writes outside Purifier mode."""
+    entry, properties, _, _, post, _ = device
+    properties["device_mode"] = 1
+    entry.runtime_data.invalidate_properties()
+    entity = FanSpeedSelect("TEST-DSN", AsyncMock(), entry.runtime_data)
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await entity.async_select_option("2")
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "fan_speed_purifier_only"
+    post.assert_not_awaited()
 
 
 async def test_fan_speed_fallback_unknown_and_poll_recovery(hass, device):

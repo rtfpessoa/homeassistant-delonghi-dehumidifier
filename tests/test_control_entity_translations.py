@@ -275,7 +275,7 @@ async def test_upgrade_preserves_registry_and_existing_automation(
         item.unique_id: (item.id, item.entity_id)
         for item in er.async_entries_for_config_entry(registry, entry.entry_id)
     }
-    assert len(before) == 16
+    assert len(before) == 17
     events = []
     hass.bus.async_listen("translated_control_test", lambda event: events.append(event))
     assert await async_setup_component(
